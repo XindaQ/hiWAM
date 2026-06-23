@@ -144,7 +144,7 @@ class Wan22Trainer:
             name=self.cfg.wandb.name,
             group=None if self.cfg.wandb.group in (None, "null", "") else str(self.cfg.wandb.group),
             mode=self.cfg.wandb.mode,
-            dir=self.output_dir,
+            dir=os.environ.get("WANDB_DIR", self.output_dir),
         )
         logger.info(
             "Initialized wandb run: workspace=%s project=%s name=%s",

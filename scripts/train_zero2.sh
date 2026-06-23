@@ -4,6 +4,13 @@ set -euo pipefail
 NPROC_PER_NODE="${1:?Usage: bash scripts/train.sh <nproc_per_node> [hydra_overrides...]}"
 shift
 
+PYTHON_BIN="${PYTHON_BIN:-/team/xinda.qi/envs/fastwam/bin/python}"
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  echo "Error: PYTHON_BIN (${PYTHON_BIN}) is not executable. Set PYTHON_BIN to the intended environment python." >&2
+  exit 1
+fi
+export WANDB_DIR="${WANDB_DIR:-/team/xinda.qi/project-zhou/wandb}"
+mkdir -p "${WANDB_DIR}"
 EXTRA_ARGS=("$@")
 NUM_MACHINES="${NNODES:-1}"
 MACHINE_RANK="${NODE_RANK:-0}"
@@ -71,7 +78,7 @@ if [[ -z "${RUN_ID:-}" ]]; then
     export RUN_ID_SYNC_TASK_BASENAME="${TASK_BASENAME}"
 
     RUN_ID="$(
-      python - <<'PY'
+      "${PYTHON_BIN}" - <<'PY'
 import datetime
 import os
 from datetime import timedelta
@@ -107,7 +114,7 @@ fi
 
 echo "[launch] nproc_per_node=${NPROC_PER_NODE} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK} run_id=${RUN_ID}"
 
-accelerate launch \
+"${PYTHON_BIN}" -m accelerate.commands.launch \
   --config_file scripts/accelerate_configs/accelerate_zero2_ds.yaml \
   --num_processes "${NPROC_PER_NODE}" \
   scripts/train.py \

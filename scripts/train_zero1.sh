@@ -9,6 +9,8 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "Error: PYTHON_BIN (${PYTHON_BIN}) is not executable. Set PYTHON_BIN to the intended environment python." >&2
   exit 1
 fi
+export WANDB_DIR="${WANDB_DIR:-/team/xinda.qi/project-zhou/wandb}"
+mkdir -p "${WANDB_DIR}"
 EXTRA_ARGS=("$@")
 NUM_MACHINES="${NNODES:-1}"
 MACHINE_RANK="${NODE_RANK:-0}"
