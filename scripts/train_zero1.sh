@@ -21,10 +21,12 @@ is_integer() {
   [[ "${1}" =~ ^[0-9]+$ ]]
 }
 
-if ! is_integer "${NUM_MACHINES}" || ! is_integer "${MACHINE_RANK}"; then
-  echo "Error: NUM_MACHINES (${NUM_MACHINES}) and MACHINE_RANK (${MACHINE_RANK}) must be integers." >&2
+if ! is_integer "${NPROC_PER_NODE}" || ! is_integer "${NUM_MACHINES}" || ! is_integer "${MACHINE_RANK}"; then
+  echo "Error: NPROC_PER_NODE (${NPROC_PER_NODE}), NUM_MACHINES (${NUM_MACHINES}) and MACHINE_RANK (${MACHINE_RANK}) must be integers." >&2
   exit 1
 fi
+
+TOTAL_PROCESSES=$((NPROC_PER_NODE * NUM_MACHINES))
 
 extract_task_basename() {
   local cfg="$1"
@@ -112,11 +114,15 @@ PY
   fi
 fi
 
-echo "[launch] nproc_per_node=${NPROC_PER_NODE} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK} run_id=${RUN_ID}"
+echo "[launch] nproc_per_node=${NPROC_PER_NODE} total_processes=${TOTAL_PROCESSES} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK} main_process=${MAIN_PROCESS_IP}:${MAIN_PROCESS_PORT} run_id=${RUN_ID}"
 
 "${PYTHON_BIN}" -m accelerate.commands.launch \
   --config_file scripts/accelerate_configs/accelerate_zero1_ds.yaml \
-  --num_processes "${NPROC_PER_NODE}" \
+  --num_processes "${TOTAL_PROCESSES}" \
+  --num_machines "${NUM_MACHINES}" \
+  --machine_rank "${MACHINE_RANK}" \
+  --main_process_ip "${MAIN_PROCESS_IP}" \
+  --main_process_port "${MAIN_PROCESS_PORT}" \
   scripts/train.py \
   "output_dir=./runs/${TASK_BASENAME}/${RUN_ID}" \
   "wandb.name=${TASK_BASENAME}" \
