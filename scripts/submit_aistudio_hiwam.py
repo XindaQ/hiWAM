@@ -5,14 +5,14 @@ This submitter intentionally keeps the project training configs unchanged.
 Training-specific knobs are passed as Hydra overrides in `TRAIN_OVERRIDES`.
 """
 
-from pypai.conf import ExecConf, GpuType, KMConf
+from pypai.conf import ExecConf, KMConf
 from pypai.job import PythonJobBuilder
 
 
 # AIStudio environment.
 IMAGE = "reg.docker.alibaba-inc.com/aii/aistudio:13880163-20250915220702"
 K8S_APP_NAME = "agenth20"
-CLUSTER = "sa128"
+CLUSTER = "nt205-aidc"
 NAS_MOUNT_POINT = "/team"
 NAS_EXPORT = "26d2d249ad1-jnj31.cn-heyuan-alipay.nas.aliyuncs.com:/"
 PROJECT_DIR = "/team/xinda.qi/project-zhou/code/hiWAM"
@@ -23,10 +23,10 @@ WANDB_DIR = "/team/xinda.qi/project-zhou/wandb"
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
 GPUS_PER_NODE = 8
 WORKER_NUM = 1
-GPU_TYPE = GpuType.A100
-CPU_PER_NODE = 64
-MEMORY_MB_PER_NODE = 500000
-DISK_MB_PER_NODE = 102400
+GPU_TYPE = "h20"
+CPU_PER_NODE = 128
+MEMORY_MB_PER_NODE = 1572864
+DISK_MB_PER_NODE = 1638400
 
 # Keep the original config files untouched; override runtime knobs here.
 TRAIN_SCRIPT = "scripts/train_zero1.sh"
@@ -110,6 +110,7 @@ def main():
         host_network=True,
         k8s_app_name=K8S_APP_NAME,
         k8s_priority="high",
+        labels={'"kubemaker.alipay.com/enable-privilege"': "true"},
         tag="type=SFT,basemodel=Wan2.2-TI2V-5B",
         platform="kubemaker",
     )
