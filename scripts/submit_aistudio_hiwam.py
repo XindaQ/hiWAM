@@ -12,9 +12,10 @@ from pypai.job import PythonJobBuilder
 # AIStudio environment.
 IMAGE = "reg.docker.alibaba-inc.com/aii/aistudio:13880163-20250915220702"
 K8S_APP_NAME = "agenth20"
+CLUSTER = "sa128"
 NAS_MOUNT_POINT = "/team"
 NAS_EXPORT = "26d2d249ad1-jnj31.cn-heyuan-alipay.nas.aliyuncs.com:/"
-PROJECT_DIR = "/team/xinda.qi/project-zhou/hiWAM"
+PROJECT_DIR = "/team/xinda.qi/project-zhou/code/hiWAM"
 PYTHON_BIN = "/team/xinda.qi/envs/fastwam/bin/python"
 WANDB_DIR = "/team/xinda.qi/project-zhou/wandb"
 
@@ -53,6 +54,13 @@ if ! grep -qs " {NAS_MOUNT_POINT} " /proc/mounts; then
 fi
 export SSL_NO_VERIFY=1
 
+echo "[aistudio] MASTER_ADDR=${{MASTER_ADDR:-}} MASTER_PORT=${{MASTER_PORT:-}} WORLD_SIZE=${{WORLD_SIZE:-}} RANK=${{RANK:-}}"
+echo "[aistudio] mounted filesystems:"
+mount | grep -E ' /team |nfs' || true
+echo "[aistudio] checking paths"
+ls -ld {shell_quote(PROJECT_DIR)}
+ls -l {shell_quote(PYTHON_BIN)}
+
 cd {shell_quote(PROJECT_DIR)}
 
 export PYTHON_BIN={shell_quote(PYTHON_BIN)}
@@ -72,7 +80,7 @@ bash {shell_quote(TRAIN_SCRIPT)} {GPUS_PER_NODE} \\
 
 
 def main():
-    km_conf = KMConf(image=IMAGE)
+    km_conf = KMConf(image=IMAGE, cluster=CLUSTER)
     master = ExecConf(
         num=1,
         cpu=CPU_PER_NODE,
