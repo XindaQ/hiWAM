@@ -87,6 +87,8 @@ def build_smoke_command() -> str:
         f"ls -ld {shell_quote(PROJECT_DIR)}",
         f"ls -l {shell_quote(PYTHON_BIN)}",
         f"{shell_quote(PYTHON_BIN)} -c {shell_quote(pycheck)}",
+        "echo SMOKE_DONE_SLEEPING_TO_KEEP_ALL_NODES_ALIVE",
+        "sleep 60",
     ])
 
 
