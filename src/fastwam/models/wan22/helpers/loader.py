@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 import inspect
+import os
 from typing import Any
 
 import torch
 import time
 
-from .io import ModelConfig, hash_model_file, load_state_dict
+from .io import ModelConfig, _debug_event, _debug_path_summary, hash_model_file, load_state_dict
 from .state_dict_converters import (
     wan_video_vae_state_dict_converter,
 )
@@ -93,7 +94,11 @@ def _load_registered_model(
     device: str,
     model_kwargs_override: dict[str, Any] | None = None,
 ):
+    total_start = time.time()
+    _debug_event("load_registered_start", model_name=model_name, path=_debug_path_summary(path), device=device, dtype=torch_dtype)
+    start = time.time()
     model_hash = hash_model_file(path)
+    _debug_event("load_registered_hash_done", model_name=model_name, model_hash=model_hash, seconds=f"{time.time() - start:.2f}")
 
     matched_config = None
     for config in WAN22_MODEL_REGISTRY:
@@ -112,13 +117,29 @@ def _load_registered_model(
         model_kwargs.update(model_kwargs_override)
     state_dict_converter = matched_config.get("state_dict_converter")
 
+    start = time.time()
+    _debug_event("model_init_start", model_name=model_name, model_class=model_class.__name__)
     model = model_class(**model_kwargs)
-    state_dict = load_state_dict(path, torch_dtype=torch_dtype, device="cpu")
-    if state_dict_converter is not None:
-        state_dict = state_dict_converter(state_dict)
+    _debug_event("model_init_done", model_name=model_name, seconds=f"{time.time() - start:.2f}")
 
+    start = time.time()
+    state_dict = load_state_dict(path, torch_dtype=torch_dtype, device="cpu")
+    _debug_event("state_dict_load_done", model_name=model_name, keys=len(state_dict), seconds=f"{time.time() - start:.2f}")
+    if state_dict_converter is not None:
+        start = time.time()
+        _debug_event("state_dict_convert_start", model_name=model_name)
+        state_dict = state_dict_converter(state_dict)
+        _debug_event("state_dict_convert_done", model_name=model_name, keys=len(state_dict), seconds=f"{time.time() - start:.2f}")
+
+    start = time.time()
+    _debug_event("load_state_dict_into_model_start", model_name=model_name)
     model.load_state_dict(state_dict, strict=False)
+    _debug_event("load_state_dict_into_model_done", model_name=model_name, seconds=f"{time.time() - start:.2f}")
+    start = time.time()
+    _debug_event("model_to_device_start", model_name=model_name, device=device, dtype=torch_dtype)
     model = model.to(device=device, dtype=torch_dtype)
+    _debug_event("model_to_device_done", model_name=model_name, seconds=f"{time.time() - start:.2f}")
+    _debug_event("load_registered_done", model_name=model_name, seconds=f"{time.time() - total_start:.2f}")
     return model
 
 
@@ -151,6 +172,15 @@ def load_wan22_ti2v_5b_components(
 ):
     logger.info("Loading Wan2.2-TI2V-5B components...")
     start = time.time()
+    _debug_event(
+        "wan22_load_start",
+        device=device,
+        dtype=torch_dtype,
+        base_path=os.environ.get("DIFFSYNTH_MODEL_BASE_PATH"),
+        skip_download=os.environ.get("DIFFSYNTH_SKIP_DOWNLOAD"),
+        load_text_encoder=load_text_encoder,
+        skip_dit_load_from_pretrain=skip_dit_load_from_pretrain,
+    )
 
     if dit_config is None:
         raise ValueError("`dit_config` is required for Wan2.2-TI2V-5B loading.")
@@ -162,10 +192,16 @@ def load_wan22_ti2v_5b_components(
         redirect_common_files=redirect_common_files,
     )
 
+    _debug_event("vae_download_if_necessary_start")
     vae_config.download_if_necessary()
+    _debug_event("vae_download_if_necessary_done", path=_debug_path_summary(vae_config.path))
     if load_text_encoder:
+        _debug_event("text_download_if_necessary_start")
         text_config.download_if_necessary()
+        _debug_event("text_download_if_necessary_done", path=_debug_path_summary(text_config.path))
+        _debug_event("tokenizer_download_if_necessary_start")
         tokenizer_config.download_if_necessary()
+        _debug_event("tokenizer_download_if_necessary_done", path=_debug_path_summary(tokenizer_config.path))
 
     if skip_dit_load_from_pretrain:
         logger.info(
@@ -175,7 +211,9 @@ def load_wan22_ti2v_5b_components(
         dit: WanVideoDiT = WanVideoDiT(**validated_dit_config).to(device=device, dtype=torch_dtype)
         dit_path = SKIPPED_PRETRAIN_SENTINEL
     else:
+        _debug_event("dit_download_if_necessary_start")
         dit_model_config.download_if_necessary()
+        _debug_event("dit_download_if_necessary_done", path=_debug_path_summary(dit_model_config.path))
         dit = _load_registered_model(
             dit_model_config.path,
             "wan_video_dit",
@@ -189,6 +227,7 @@ def load_wan22_ti2v_5b_components(
     text_encoder_path: str | None = None
     tokenizer_path: str | None = None
     if load_text_encoder:
+        _debug_event("text_encoder_load_start", path=_debug_path_summary(text_config.path))
         text_encoder = _load_registered_model(
             text_config.path,
             "wan_video_text_encoder",
@@ -202,13 +241,17 @@ def load_wan22_ti2v_5b_components(
         )
         text_encoder_path = str(text_config.path)
         tokenizer_path = str(tokenizer_config.path)
+        _debug_event("text_encoder_load_done", path=text_encoder_path)
     else:
         logger.info(
             "Skipping pretrained text encoder/tokenizer load (`load_text_encoder=False`); "
             "training must provide cached `context/context_mask`."
         )
+    _debug_event("vae_load_start", path=_debug_path_summary(vae_config.path))
     vae: WanVideoVAE38 = _load_registered_model(vae_config.path, "wan_video_vae", torch_dtype=torch_dtype, device=device)
+    _debug_event("vae_load_done", path=str(vae_config.path))
     logger.info("Finished loading Wan2.2-TI2V-5B components in %.2f seconds.", time.time() - start)
+    _debug_event("wan22_load_done", seconds=f"{time.time() - start:.2f}")
     return Wan22LoadedComponents(
         dit=dit,
         vae=vae,

@@ -1,11 +1,55 @@
 import glob
 import hashlib
 import os
+import socket
+import time
 from dataclasses import dataclass
 from typing import Dict, Optional, Union
 
 import torch
 from safetensors import safe_open
+
+
+def _debug_enabled():
+    return os.environ.get("FASTWAM_DEBUG_WAN_LOAD", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _debug_event(event, **fields):
+    if not _debug_enabled():
+        return
+    prefix = {
+        "event": event,
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "rank": os.environ.get("RANK", "?"),
+        "local_rank": os.environ.get("LOCAL_RANK", "?"),
+    }
+    prefix.update(fields)
+    message = " ".join(f"{key}={value}" for key, value in prefix.items())
+    print(f"[wan_load_debug] {message}", flush=True)
+
+
+def _debug_path_summary(path):
+    if isinstance(path, list):
+        total = 0
+        parts = []
+        for item in path:
+            try:
+                size = os.path.getsize(item)
+            except OSError:
+                size = -1
+            if size > 0:
+                total += size
+            parts.append(f"{item}:{size}")
+        return f"list_len={len(path)} total_bytes={total} items={parts[:4]}"
+    if path is None:
+        return "None"
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = -1
+    return f"{path}:{size}"
 
 
 @dataclass
@@ -101,8 +145,21 @@ class ModelConfig:
     def download_if_necessary(self):
         self.check_input()
         self.reset_local_model_path()
-        if self.require_downloading():
+        origin_file_pattern = self.parse_original_file_pattern()
+        local_root = os.path.join(self.local_model_path, self.model_id) if self.model_id is not None else None
+        _debug_event(
+            "download_check_start",
+            model_id=self.model_id,
+            pattern=origin_file_pattern,
+            local_root=local_root,
+            skip_download=self.parse_skip_download(),
+        )
+        needs_download = self.require_downloading()
+        _debug_event("download_check_done", model_id=self.model_id, needs_download=needs_download)
+        if needs_download:
+            _debug_event("download_start", model_id=self.model_id, pattern=origin_file_pattern, local_root=local_root)
             self.download()
+            _debug_event("download_done", model_id=self.model_id)
         if self.path is None:
             if self.origin_file_pattern in [None, "", "./"]:
                 self.path = os.path.join(self.local_model_path, self.model_id)
@@ -112,6 +169,7 @@ class ModelConfig:
                 self.path = matches
         if isinstance(self.path, list) and len(self.path) == 1:
             self.path = self.path[0]
+        _debug_event("download_if_necessary_done", model_id=self.model_id, path=_debug_path_summary(self.path))
 
 
 def load_state_dict(file_path, torch_dtype=None, device="cpu"):
@@ -126,6 +184,8 @@ def load_state_dict(file_path, torch_dtype=None, device="cpu"):
 
 
 def load_state_dict_from_safetensors(file_path, torch_dtype=None, device="cpu"):
+    start = time.time()
+    _debug_event("load_safetensors_start", path=_debug_path_summary(file_path), dtype=torch_dtype, device=device)
     state_dict = {}
     with safe_open(file_path, framework="pt", device=str(device)) as f:
         for key in f.keys():
@@ -133,10 +193,13 @@ def load_state_dict_from_safetensors(file_path, torch_dtype=None, device="cpu"):
             if torch_dtype is not None:
                 value = value.to(torch_dtype)
             state_dict[key] = value
+    _debug_event("load_safetensors_done", path=file_path, keys=len(state_dict), seconds=f"{time.time() - start:.2f}")
     return state_dict
 
 
 def load_state_dict_from_bin(file_path, torch_dtype=None, device="cpu"):
+    start = time.time()
+    _debug_event("load_bin_start", path=_debug_path_summary(file_path), dtype=torch_dtype, device=device)
     state_dict = torch.load(file_path, map_location=device, weights_only=True)
     if len(state_dict) == 1:
         if "state_dict" in state_dict:
@@ -149,6 +212,7 @@ def load_state_dict_from_bin(file_path, torch_dtype=None, device="cpu"):
         for key in state_dict:
             if isinstance(state_dict[key], torch.Tensor):
                 state_dict[key] = state_dict[key].to(torch_dtype)
+    _debug_event("load_bin_done", path=file_path, keys=len(state_dict), seconds=f"{time.time() - start:.2f}")
     return state_dict
 
 
@@ -202,6 +266,10 @@ def _convert_keys_dict_to_single_str(keys_dict, with_shape=True):
 
 
 def hash_model_file(path, with_shape=True):
+    start = time.time()
+    _debug_event("hash_model_file_start", path=_debug_path_summary(path), with_shape=with_shape)
     keys_dict = _load_keys_dict(path)
     keys_str = _convert_keys_dict_to_single_str(keys_dict, with_shape=with_shape).encode("UTF-8")
-    return hashlib.md5(keys_str).hexdigest()
+    digest = hashlib.md5(keys_str).hexdigest()
+    _debug_event("hash_model_file_done", path=_debug_path_summary(path), hash=digest, seconds=f"{time.time() - start:.2f}")
+    return digest
