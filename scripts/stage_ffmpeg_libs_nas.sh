@@ -28,14 +28,32 @@ else
     /usr/local/lib
     /opt/conda/lib
   )
+  AV_LIBS="$("${PYTHON_BIN}" - <<'PY' 2>/dev/null || true
+import pathlib
+
+try:
+    import av
+except Exception:
+    raise SystemExit(0)
+
+libdir = pathlib.Path(av.__file__).resolve().parent.parent / "av.libs"
+if libdir.is_dir():
+    print(libdir)
+PY
+)"
+  if [[ -n "${AV_LIBS}" && -d "${AV_LIBS}" ]]; then
+    scan_dirs+=("${AV_LIBS}")
+  fi
 fi
 
 find_first() {
-  local pattern="$1"
+  local soname="$1"
+  local base="${soname%%.so.*}"
+  local suffix="${soname#${base}.so.}"
   local dir
   for dir in "${scan_dirs[@]}"; do
     [[ -d "${dir}" ]] || continue
-    find "${dir}" -maxdepth 1 -name "${pattern}" -type f -print -quit
+    find "${dir}" -maxdepth 1 \( -name "${soname}*" -o -name "${base}"'-*.so.'"${suffix}"'*' \) -type f -print -quit
   done
 }
 
@@ -75,7 +93,7 @@ for version in 7 6 5 4; do
   current_sources=()
   found_all=1
   while IFS= read -r soname; do
-    src="$(find_first "${soname}*")"
+    src="$(find_first "${soname}")"
     if [[ -z "${src}" ]]; then
       found_all=0
       break
