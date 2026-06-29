@@ -14,6 +14,14 @@ DEEPSPEED_BIN="${DEEPSPEED_BIN:-${FASTWAM_ENV}/bin/deepspeed}"
 export FASTWAM_ENV DEEPSPEED_BIN
 export PATH="${FASTWAM_ENV}/bin:${PATH}"
 export LD_LIBRARY_PATH="${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}"
+FFMPEG_BIN="$("${PYTHON_BIN}" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())' 2>/dev/null || true)"
+if [[ -n "${FFMPEG_BIN}" && -x "${FFMPEG_BIN}" ]]; then
+  mkdir -p /tmp/hiwam_bin
+  ln -sf "${FFMPEG_BIN}" /tmp/hiwam_bin/ffmpeg
+  export PATH="/tmp/hiwam_bin:${PATH}"
+  export IMAGEIO_FFMPEG_EXE="${FFMPEG_BIN}"
+  echo "[launch] ffmpeg=$(command -v ffmpeg)"
+fi
 if [[ ! -x "${DEEPSPEED_BIN}" ]]; then
   echo "Error: DEEPSPEED_BIN (${DEEPSPEED_BIN}) is not executable." >&2
   exit 1

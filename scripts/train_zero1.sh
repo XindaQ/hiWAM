@@ -9,6 +9,14 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "Error: PYTHON_BIN (${PYTHON_BIN}) is not executable. Set PYTHON_BIN to the intended environment python." >&2
   exit 1
 fi
+FFMPEG_BIN="$("${PYTHON_BIN}" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())' 2>/dev/null || true)"
+if [[ -n "${FFMPEG_BIN}" && -x "${FFMPEG_BIN}" ]]; then
+  mkdir -p /tmp/hiwam_bin
+  ln -sf "${FFMPEG_BIN}" /tmp/hiwam_bin/ffmpeg
+  export PATH="/tmp/hiwam_bin:${PATH}"
+  export IMAGEIO_FFMPEG_EXE="${FFMPEG_BIN}"
+  echo "[launch] ffmpeg=$(command -v ffmpeg)"
+fi
 export WANDB_DIR="${WANDB_DIR:-/team/xinda.qi/project-zhou/wandb}"
 mkdir -p "${WANDB_DIR}"
 EXTRA_ARGS=("$@")
