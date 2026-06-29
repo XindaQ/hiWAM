@@ -37,19 +37,28 @@ GPU_TYPE = GpuType.H20
 CPU_PER_NODE = 128
 MEMORY_MB_PER_NODE = 1572864
 DISK_MB_PER_NODE = 1638400
-RUN_TAG = f"{datetime.now():%Y%m%d_%H%M%S}_{COMMAND_MODE}_{NODE_COUNT}n{TOTAL_GPUS}g_{uuid4().hex[:6]}"
-LOG_DIR = f"{LOG_ROOT}/{RUN_TAG}"
 
 # Keep the original config files untouched; override runtime knobs here.
 TRAIN_SCRIPT = "scripts/train_zero1.sh"
 TRAIN_TASK = "libero_uncond_2cam224_1e-4"
+PER_GPU_BATCH_SIZE = 8
+MAX_STEPS = 20
+NUM_WORKERS = 4
+ZERO_STAGE = 1
+RUN_TAG = (
+    f"{datetime.now():%Y%m%d_%H%M%S}_"
+    f"{NODE_COUNT}n{TOTAL_GPUS}g_"
+    f"bs{PER_GPU_BATCH_SIZE}_s{MAX_STEPS}_z{ZERO_STAGE}_"
+    f"{uuid4().hex[:6]}"
+)
+LOG_DIR = f"{LOG_ROOT}/{RUN_TAG}"
 TRAIN_OVERRIDES = [
     f"task={TRAIN_TASK}",
-    "batch_size=8",
-    "max_steps=20",
-    "num_workers=4",
+    f"batch_size={PER_GPU_BATCH_SIZE}",
+    f"max_steps={MAX_STEPS}",
+    f"num_workers={NUM_WORKERS}",
     "wandb.mode=offline",
-    f"output_dir=/team/xinda.qi/project-zhou/runs/{RUN_TAG}",
+    f"output_dir=./runs/{TRAIN_TASK}/{RUN_TAG}",
 ]
 
 
