@@ -107,9 +107,42 @@ def build_train_command() -> str:
         f"ls -l {shell_quote(PYTHON_BIN)}",
         f"cd {shell_quote(PROJECT_DIR)}",
         f"export PYTHON_BIN={shell_quote(PYTHON_BIN)}",
+        'export FASTWAM_ENV="$(dirname "$(dirname "$PYTHON_BIN")")"',
+        'unset PYTHONPATH PythonPath',
+        'export PYTHONPATH="$PWD/src"',
+        'export PATH="$FASTWAM_ENV/bin:$PATH"',
+        'export LD_LIBRARY_PATH="$FASTWAM_ENV/lib:${LD_LIBRARY_PATH:-}"',
+        'export VIRTUAL_ENV="$FASTWAM_ENV"',
+        'export CONDA_PREFIX="$FASTWAM_ENV"',
+        'export CONDA_DEFAULT_ENV="$(basename "$FASTWAM_ENV")"',
+        "export PYTHONNOUSERSITE=1",
+        "hash -r",
         f"export WANDB_DIR={shell_quote(WANDB_DIR)}",
         "export NCCL_DEBUG=INFO",
         "export RUN_ID_SYNC_TIMEOUT=900",
+        'echo FASTWAM_ENV="$FASTWAM_ENV"',
+        'echo PATH="$PATH"',
+        'echo PYTHONPATH="$PYTHONPATH"',
+        'echo LD_LIBRARY_PATH="$LD_LIBRARY_PATH"',
+        "command -v python",
+        "command -v deepspeed",
+        (
+            f"{shell_quote(PYTHON_BIN)} -c "
+            + shell_quote(
+                "import os, shutil, sys; "
+                "print('PYTHON_EXE', sys.executable); "
+                "print('PYTHON_PREFIX', sys.prefix); "
+                "print('PYTHON_BASE_PREFIX', sys.base_prefix); "
+                "print('WHICH_DEEPSPEED', shutil.which('deepspeed')); "
+                "print('ENV_CONDA_PREFIX', os.environ.get('CONDA_PREFIX')); "
+                "print('ENV_PYTHONPATH', os.environ.get('PYTHONPATH')); "
+                "print('SYS_PATH_HEAD', sys.path[:8]); "
+                "import accelerate, deepspeed, torch; "
+                "print('ACCELERATE_FILE', accelerate.__file__); "
+                "print('DEEPSPEED_FILE', deepspeed.__file__); "
+                "print('TORCH_FILE', torch.__file__)"
+            )
+        ),
         "export NNODES=${WORLD_SIZE}",
         "export NODE_RANK=${RANK}",
         "unset RANK WORLD_SIZE LOCAL_RANK",
