@@ -12,18 +12,25 @@ from pypai.job import PythonJobBuilder
 # AIStudio environment.
 IMAGE = "reg.docker.alibaba-inc.com/aii/aistudio:13880163-20250915220702"
 K8S_APP_NAME = "agenth20"
-CLUSTER = "nt205-aidc"
+CLUSTER = "auto"
+KM_POOL = "kubemaker"
 NAS_MOUNT_POINT = "/team"
 NAS_EXPORT = "26d2d249ad1-jnj31.cn-heyuan-alipay.nas.aliyuncs.com:/"
 PROJECT_DIR = "/team/xinda.qi/project-zhou/code/hiWAM"
 PYTHON_BIN = "/team/xinda.qi/envs/fastwam/bin/python"
 WANDB_DIR = "/team/xinda.qi/project-zhou/wandb"
 
+# Use "smoke" first to verify AIStudio can start the 2-node/16-GPU job.
+# Switch to "train" after the simple command succeeds.
+COMMAND_MODE = "smoke"
+
 # Resource shape. For 2 nodes x 8 GPUs, keep WORKER_NUM = 1.
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
 GPUS_PER_NODE = 8
 WORKER_NUM = 1
-GPU_TYPE = "h20"
+# The current aii-pypai GpuType enum only has P100/A10/V100/A100. For the
+# dedicated agenth20 pool, let k8s_app_name + gpu_num select H20 resources.
+GPU_TYPE = None
 CPU_PER_NODE = 128
 MEMORY_MB_PER_NODE = 1572864
 DISK_MB_PER_NODE = 1638400
@@ -44,59 +51,91 @@ def shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
+def build_smoke_command() -> str:
+    pycheck = (
+        "import sys, torch, accelerate, deepspeed; "
+        "print('PYTHON', sys.executable); "
+        "print('TORCH', torch.__version__); "
+        "print('CUDA_AVAILABLE', torch.cuda.is_available()); "
+        "print('CUDA_DEVICE_COUNT', torch.cuda.device_count()); "
+        "print('ACCELERATE', accelerate.__version__); "
+        "print('DEEPSPEED', deepspeed.__version__)"
+    )
+    return " && ".join([
+        "echo AI_ENV MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT WORLD_SIZE=$WORLD_SIZE RANK=$RANK",
+        "hostname",
+        "date",
+        "nvidia-smi",
+        f"mkdir -p {shell_quote(NAS_MOUNT_POINT)}",
+        f"(mountpoint -q {shell_quote(NAS_MOUNT_POINT)} || mount -t nfs -o vers=3,nolock,proto=tcp {shell_quote(NAS_EXPORT)} {shell_quote(NAS_MOUNT_POINT)})",
+        "mount | grep ' /team ' || true",
+        f"ls -ld {shell_quote(PROJECT_DIR)}",
+        f"ls -l {shell_quote(PYTHON_BIN)}",
+        f"{shell_quote(PYTHON_BIN)} -c {shell_quote(pycheck)}",
+    ])
+
+
+def build_train_command() -> str:
+    overrides = " ".join(shell_quote(item) for item in TRAIN_OVERRIDES)
+    return " && ".join([
+        f"mkdir -p {shell_quote(NAS_MOUNT_POINT)}",
+        f"mount -t nfs -o vers=3,nolock,proto=tcp {shell_quote(NAS_EXPORT)} {shell_quote(NAS_MOUNT_POINT)} || true",
+        "export SSL_NO_VERIFY=1",
+        "printenv",
+        f"ls -ld {shell_quote(PROJECT_DIR)}",
+        f"ls -l {shell_quote(PYTHON_BIN)}",
+        f"cd {shell_quote(PROJECT_DIR)}",
+        f"export PYTHON_BIN={shell_quote(PYTHON_BIN)}",
+        f"export WANDB_DIR={shell_quote(WANDB_DIR)}",
+        "export NCCL_DEBUG=INFO",
+        "export NNODES=${WORLD_SIZE}",
+        "export NODE_RANK=${RANK}",
+        "unset RANK WORLD_SIZE LOCAL_RANK",
+        f"bash {shell_quote(TRAIN_SCRIPT)} {GPUS_PER_NODE} {overrides}",
+    ])
+
+
 def build_command() -> str:
-    overrides = " \\\n  ".join(shell_quote(item) for item in TRAIN_OVERRIDES)
-    return f"""set -euo pipefail
-
-mkdir -p {shell_quote(NAS_MOUNT_POINT)}
-if ! grep -qs " {NAS_MOUNT_POINT} " /proc/mounts; then
-  mount -t nfs -o vers=3,nolock,proto=tcp {shell_quote(NAS_EXPORT)} {shell_quote(NAS_MOUNT_POINT)}
-fi
-export SSL_NO_VERIFY=1
-
-echo "[aistudio] MASTER_ADDR=${{MASTER_ADDR:-}} MASTER_PORT=${{MASTER_PORT:-}} WORLD_SIZE=${{WORLD_SIZE:-}} RANK=${{RANK:-}}"
-echo "[aistudio] mounted filesystems:"
-mount | grep -E ' /team |nfs' || true
-echo "[aistudio] checking paths"
-ls -ld {shell_quote(PROJECT_DIR)}
-ls -l {shell_quote(PYTHON_BIN)}
-
-cd {shell_quote(PROJECT_DIR)}
-
-export PYTHON_BIN={shell_quote(PYTHON_BIN)}
-export WANDB_DIR={shell_quote(WANDB_DIR)}
-export NCCL_DEBUG="${{NCCL_DEBUG:-INFO}}"
-
-# AIStudio exposes node-level WORLD_SIZE/RANK. hiWAM scripts expect NNODES/NODE_RANK.
-export NNODES="${{WORLD_SIZE}}"
-export NODE_RANK="${{RANK}}"
-
-# Avoid leaking AIStudio's node-level rank names into libraries that expect process ranks.
-unset RANK WORLD_SIZE LOCAL_RANK
-
-bash {shell_quote(TRAIN_SCRIPT)} {GPUS_PER_NODE} \\
-  {overrides}
-"""
+    if COMMAND_MODE == "smoke":
+        return build_smoke_command()
+    if COMMAND_MODE == "train":
+        return build_train_command()
+    raise ValueError(f"Unsupported COMMAND_MODE: {COMMAND_MODE}")
 
 
 def main():
-    km_conf = KMConf(image=IMAGE, cluster=CLUSTER)
-    master = ExecConf(
-        num=1,
+    print("[submit] image:", IMAGE)
+    print("[submit] app:", K8S_APP_NAME)
+    print("[submit] cluster:", CLUSTER)
+    print("[submit] gpu_type:", GPU_TYPE)
+    print("[submit] command_mode:", COMMAND_MODE)
+    print("[submit] master: num=1 gpu_num=%s cpu=%s memory=%s disk_m=%s" % (
+        GPUS_PER_NODE,
+        CPU_PER_NODE,
+        MEMORY_MB_PER_NODE,
+        DISK_MB_PER_NODE,
+    ))
+    print("[submit] worker: num=%s gpu_num=%s cpu=%s memory=%s disk_m=%s" % (
+        WORKER_NUM,
+        GPUS_PER_NODE,
+        CPU_PER_NODE,
+        MEMORY_MB_PER_NODE,
+        DISK_MB_PER_NODE,
+    ))
+    print("[submit] command:\n" + build_command())
+
+    km_conf = KMConf(image=IMAGE, pool=KM_POOL, cluster=CLUSTER)
+    exec_kwargs = dict(
         cpu=CPU_PER_NODE,
         memory=MEMORY_MB_PER_NODE,
         gpu_num=GPUS_PER_NODE,
-        gpu_type=GPU_TYPE,
         disk_m=DISK_MB_PER_NODE,
     )
-    worker = ExecConf(
-        num=WORKER_NUM,
-        cpu=CPU_PER_NODE,
-        memory=MEMORY_MB_PER_NODE,
-        gpu_num=GPUS_PER_NODE,
-        gpu_type=GPU_TYPE,
-        disk_m=DISK_MB_PER_NODE,
-    )
+    if GPU_TYPE is not None:
+        exec_kwargs["gpu_type"] = GPU_TYPE
+
+    master = ExecConf(num=1, **exec_kwargs)
+    worker = ExecConf(num=WORKER_NUM, **exec_kwargs)
 
     job = PythonJobBuilder(
         source_root=None,
@@ -109,8 +148,7 @@ def main():
         rdma=True,
         host_network=True,
         k8s_app_name=K8S_APP_NAME,
-        k8s_priority="high",
-        labels={'"kubemaker.alipay.com/enable-privilege"': "true"},
+        k8s_priority="low",
         tag="type=SFT,basemodel=Wan2.2-TI2V-5B",
         platform="kubemaker",
     )
