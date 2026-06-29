@@ -6,6 +6,7 @@ Training-specific knobs are passed as Hydra overrides in `TRAIN_OVERRIDES`.
 """
 
 from datetime import datetime
+import os
 from uuid import uuid4
 
 from pypai.conf import ExecConf, GpuType, KMConf
@@ -24,8 +25,9 @@ PYTHON_BIN = "/team/xinda.qi/envs/fastwam/bin/python"
 WANDB_DIR = "/team/xinda.qi/project-zhou/wandb"
 LOG_ROOT = "/team/xinda.qi/project-zhou/aistudio_job_logs"
 
-# Use "smoke" to verify AIStudio can start all nodes; use "train" for the 20-step test.
-COMMAND_MODE = "train"
+# Use "smoke" to verify AIStudio can start all nodes; "comm" for NCCL/RDMA diagnostics;
+# use "train" for the 20-step training test.
+COMMAND_MODE = os.environ.get("COMMAND_MODE", "train")
 
 # Resource shape. For 2 nodes x 8 GPUs, keep WORKER_NUM = 1.
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
@@ -40,13 +42,20 @@ DISK_MB_PER_NODE = 1638400
 
 # Keep the original config files untouched; override runtime knobs here.
 TRAIN_SCRIPT = "scripts/train_zero1.sh"
-TRAIN_TASK = "libero_uncond_2cam224_1e-4"
+COMM_SCRIPT = "scripts/nccl_comm_smoke.py"
+TRAIN_TASK = os.environ.get("TRAIN_TASK", "libero_idm_2cam224_1e-4")
 PER_GPU_BATCH_SIZE = 8
 MAX_STEPS = 20
 NUM_WORKERS = 4
 ZERO_STAGE = 1
+if "uncond" in TRAIN_TASK and os.environ.get("ALLOW_UNCOND", "0") != "1":
+    raise ValueError(
+        f"Refusing to submit uncond task by default: {TRAIN_TASK}. "
+        "Set ALLOW_UNCOND=1 only if this is intentional."
+    )
 RUN_TAG = (
     f"{datetime.now():%Y%m%d_%H%M%S}_"
+    f"{COMMAND_MODE}_"
     f"{NODE_COUNT}n{TOTAL_GPUS}g_"
     f"bs{PER_GPU_BATCH_SIZE}_s{MAX_STEPS}_z{ZERO_STAGE}_"
     f"{uuid4().hex[:6]}"
@@ -107,6 +116,51 @@ def build_smoke_command() -> str:
     ])
 
 
+def build_comm_command() -> str:
+    return build_logged_command("comm", [
+        "export SSL_NO_VERIFY=1",
+        "echo AI_ENV MASTER_ADDR=${MASTER_ADDR:-} MASTER_PORT=${MASTER_PORT:-} WORLD_SIZE=${WORLD_SIZE:-} RANK=${RANK:-}",
+        "hostname",
+        "date",
+        "env | sort | grep -E '^(NCCL|UCX|IB|CUDA|MASTER|WORLD_SIZE|RANK|HOST_PORTS|NODE_|POD_|ALIPAY_APP_IDC|AISTUDIO_PROJECT_NAME)=' || true",
+        "nvidia-smi",
+        "nvidia-smi topo -m || true",
+        "ls -l /dev/infiniband || true",
+        "(command -v ibv_devinfo && ibv_devinfo) || true",
+        "(command -v ibstat && ibstat) || true",
+        "ldconfig -p 2>/dev/null | grep -E 'ibverbs|nccl|mlx' || true",
+        "find /usr /opt /team/xinda.qi/envs/fastwam -name 'libnccl-net.so*' -o -name 'libibverbs.so*' 2>/dev/null | head -50 || true",
+        f"ls -ld {shell_quote(PROJECT_DIR)}",
+        f"ls -l {shell_quote(PYTHON_BIN)}",
+        f"cd {shell_quote(PROJECT_DIR)}",
+        f"export PYTHON_BIN={shell_quote(PYTHON_BIN)}",
+        'export FASTWAM_ENV="$(dirname "$(dirname "$PYTHON_BIN")")"',
+        'unset PYTHONPATH PythonPath',
+        'export PYTHONPATH="$PWD/src"',
+        'export PATH="$FASTWAM_ENV/bin:$PATH"',
+        'export LD_LIBRARY_PATH="$FASTWAM_ENV/lib:${LD_LIBRARY_PATH:-}"',
+        'export VIRTUAL_ENV="$FASTWAM_ENV"',
+        'export CONDA_PREFIX="$FASTWAM_ENV"',
+        'export CONDA_DEFAULT_ENV="$(basename "$FASTWAM_ENV")"',
+        "export PYTHONNOUSERSITE=1",
+        "hash -r",
+        "export NCCL_DEBUG=INFO",
+        "export NCCL_DEBUG_SUBSYS=INIT,NET,ENV,COLL",
+        "export NNODES=${WORLD_SIZE}",
+        "export NODE_RANK=${RANK}",
+        "unset RANK WORLD_SIZE LOCAL_RANK",
+        (
+            f"{shell_quote(PYTHON_BIN)} -m torch.distributed.run "
+            f"--nnodes \"${{NNODES}}\" "
+            f"--nproc_per_node {GPUS_PER_NODE} "
+            f"--node_rank \"${{NODE_RANK}}\" "
+            f"--master_addr \"${{MASTER_ADDR}}\" "
+            f"--master_port \"${{MASTER_PORT}}\" "
+            f"{shell_quote(COMM_SCRIPT)} --sizes-mb 1,16,64,256,512 --warmup 5 --iters 20"
+        ),
+    ])
+
+
 def build_train_command() -> str:
     overrides = " ".join(shell_quote(item) for item in TRAIN_OVERRIDES)
     return build_logged_command("train", [
@@ -128,7 +182,7 @@ def build_train_command() -> str:
         "export PYTHONNOUSERSITE=1",
         "hash -r",
         f"export WANDB_DIR={shell_quote(WANDB_DIR)}",
-        "export NCCL_DEBUG=INFO",
+        "export NCCL_DEBUG=WARN",
         "export RUN_ID_SYNC_TIMEOUT=900",
         'echo FASTWAM_ENV="$FASTWAM_ENV"',
         'echo DEEPSPEED_BIN="$DEEPSPEED_BIN"',
@@ -166,6 +220,8 @@ def build_train_command() -> str:
 def build_command() -> str:
     if COMMAND_MODE == "smoke":
         return build_smoke_command()
+    if COMMAND_MODE == "comm":
+        return build_comm_command()
     if COMMAND_MODE == "train":
         return build_train_command()
     raise ValueError(f"Unsupported COMMAND_MODE: {COMMAND_MODE}")
@@ -179,6 +235,9 @@ def main():
     print("[submit] command_mode:", COMMAND_MODE)
     print("[submit] run_tag:", RUN_TAG)
     print("[submit] log_dir:", LOG_DIR)
+    print("[submit] train_task:", TRAIN_TASK)
+    print("[submit] per_gpu_batch_size:", PER_GPU_BATCH_SIZE)
+    print("[submit] max_steps:", MAX_STEPS)
     print("[submit] master: num=1 gpu_num=%s cpu=%s memory=%s disk_m=%s" % (
         GPUS_PER_NODE,
         CPU_PER_NODE,

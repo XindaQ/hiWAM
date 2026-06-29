@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${PROJECT_DIR}"
+
 NPROC_PER_NODE="${1:?Usage: bash scripts/train_zero1.sh <nproc_per_node> [hydra_overrides...]}"
 shift
 
@@ -11,9 +15,22 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 FASTWAM_ENV="${FASTWAM_ENV:-$(dirname "$(dirname "${PYTHON_BIN}")")}"
 DEEPSPEED_BIN="${DEEPSPEED_BIN:-${FASTWAM_ENV}/bin/deepspeed}"
-export FASTWAM_ENV DEEPSPEED_BIN
+
+if [[ "${PRESERVE_PYTHONPATH:-0}" != "1" ]]; then
+  unset PYTHONPATH PythonPath
+fi
+
+export PYTHON_BIN FASTWAM_ENV DEEPSPEED_BIN
+export PYTHONPATH="${PROJECT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}"
 export PATH="${FASTWAM_ENV}/bin:${PATH}"
 export LD_LIBRARY_PATH="${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}"
+export VIRTUAL_ENV="${FASTWAM_ENV}"
+export CONDA_PREFIX="${FASTWAM_ENV}"
+export CONDA_DEFAULT_ENV="$(basename "${FASTWAM_ENV}")"
+export PYTHONNOUSERSITE="${PYTHONNOUSERSITE:-1}"
+export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
+hash -r
+
 if [[ ! -x "${DEEPSPEED_BIN}" ]]; then
   echo "Error: DEEPSPEED_BIN (${DEEPSPEED_BIN}) is not executable." >&2
   exit 1
@@ -124,8 +141,12 @@ PY
   fi
 fi
 
+RUN_DIR="./runs/${TASK_BASENAME}/${RUN_ID}"
+mkdir -p "${RUN_DIR}"
+
 echo "[launch] nproc_per_node=${NPROC_PER_NODE} total_processes=${TOTAL_PROCESSES} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK} main_process=${MAIN_PROCESS_IP}:${MAIN_PROCESS_PORT} run_id=${RUN_ID} deepspeed_multinode_launcher=${DEEPSPEED_MULTINODE_LAUNCHER}"
 echo "[launch] python_bin=${PYTHON_BIN} fastwam_env=${FASTWAM_ENV} deepspeed_bin=${DEEPSPEED_BIN} path_deepspeed=$(command -v deepspeed || true)"
+echo "[launch] run_dir=${RUN_DIR} hydra_log=${RUN_DIR}/train.log"
 
 "${PYTHON_BIN}" -m accelerate.commands.launch \
   --config_file scripts/accelerate_configs/accelerate_zero1_ds.yaml \
@@ -136,6 +157,7 @@ echo "[launch] python_bin=${PYTHON_BIN} fastwam_env=${FASTWAM_ENV} deepspeed_bin
   --main_process_port "${MAIN_PROCESS_PORT}" \
   --deepspeed_multinode_launcher "${DEEPSPEED_MULTINODE_LAUNCHER}" \
   scripts/train.py \
-  "output_dir=./runs/${TASK_BASENAME}/${RUN_ID}" \
+  "output_dir=${RUN_DIR}" \
+  "hydra.run.dir=${RUN_DIR}" \
   "wandb.name=${TASK_BASENAME}" \
   "${EXTRA_ARGS[@]}"
