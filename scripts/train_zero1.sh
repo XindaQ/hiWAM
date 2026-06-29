@@ -9,6 +9,8 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "Error: PYTHON_BIN (${PYTHON_BIN}) is not executable. Set PYTHON_BIN to the intended environment python." >&2
   exit 1
 fi
+FASTWAM_ENV="${FASTWAM_ENV:-$(dirname "$(dirname "${PYTHON_BIN}")")}"
+export LD_LIBRARY_PATH="${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}"
 FFMPEG_BIN="$("${PYTHON_BIN}" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())' 2>/dev/null || true)"
 if [[ -n "${FFMPEG_BIN}" && -x "${FFMPEG_BIN}" ]]; then
   mkdir -p /tmp/hiwam_bin
