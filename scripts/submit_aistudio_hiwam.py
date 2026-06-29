@@ -5,6 +5,9 @@ This submitter intentionally keeps the project training configs unchanged.
 Training-specific knobs are passed as Hydra overrides in `TRAIN_OVERRIDES`.
 """
 
+from datetime import datetime
+from uuid import uuid4
+
 from pypai.conf import ExecConf, GpuType, KMConf
 from pypai.job import PythonJobBuilder
 
@@ -19,30 +22,34 @@ NAS_EXPORT = "26d2d249ad1-jnj31.cn-heyuan-alipay.nas.aliyuncs.com:/"
 PROJECT_DIR = "/team/xinda.qi/project-zhou/code/hiWAM"
 PYTHON_BIN = "/team/xinda.qi/envs/fastwam/bin/python"
 WANDB_DIR = "/team/xinda.qi/project-zhou/wandb"
-LOG_DIR = "/team/xinda.qi/project-zhou/aistudio_job_logs"
+LOG_ROOT = "/team/xinda.qi/project-zhou/aistudio_job_logs"
 
-# Use "smoke" first to verify AIStudio can start the 2-node/16-GPU job.
-# Switch to "train" after the simple command succeeds.
-COMMAND_MODE = "smoke"
+# Use "smoke" to verify AIStudio can start all nodes; use "train" for the 20-step test.
+COMMAND_MODE = "train"
 
 # Resource shape. For 2 nodes x 8 GPUs, keep WORKER_NUM = 1.
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
 GPUS_PER_NODE = 8
 WORKER_NUM = 1
+NODE_COUNT = WORKER_NUM + 1
+TOTAL_GPUS = NODE_COUNT * GPUS_PER_NODE
 GPU_TYPE = GpuType.H20
 CPU_PER_NODE = 128
 MEMORY_MB_PER_NODE = 1572864
 DISK_MB_PER_NODE = 1638400
+RUN_TAG = f"{datetime.now():%Y%m%d_%H%M%S}_{COMMAND_MODE}_{NODE_COUNT}n{TOTAL_GPUS}g_{uuid4().hex[:6]}"
+LOG_DIR = f"{LOG_ROOT}/{RUN_TAG}"
 
 # Keep the original config files untouched; override runtime knobs here.
 TRAIN_SCRIPT = "scripts/train_zero1.sh"
+TRAIN_TASK = "libero_uncond_2cam224_1e-4"
 TRAIN_OVERRIDES = [
-    "task=libero_uncond_2cam224_1e-4",
+    f"task={TRAIN_TASK}",
     "batch_size=8",
     "max_steps=20",
     "num_workers=4",
     "wandb.mode=offline",
-    "output_dir=/team/xinda.qi/project-zhou/runs/aistudio_hiwam_smoke_2n8g_b8_s20",
+    f"output_dir=/team/xinda.qi/project-zhou/runs/{RUN_TAG}",
 ]
 
 
@@ -51,10 +58,7 @@ def shell_quote(value: str) -> str:
 
 
 def build_logged_command(mode: str, commands: list[str]) -> str:
-    log_file = (
-        f"{shell_quote(LOG_DIR)}/hiwam_{mode}_rank_${{RANK:-unknown}}_"
-        "$(hostname)_$(date +%Y%m%d_%H%M%S).log"
-    )
+    log_file = f"{shell_quote(LOG_DIR)}/rank_${{RANK:-unknown}}.log"
     prelude = [
         "set -eo pipefail",
         f"mkdir -p {shell_quote(NAS_MOUNT_POINT)}",
@@ -62,6 +66,8 @@ def build_logged_command(mode: str, commands: list[str]) -> str:
         f"mkdir -p {shell_quote(LOG_DIR)}",
         f"LOG_FILE={log_file}",
         'exec > >(tee -a "$LOG_FILE") 2>&1',
+        f"echo RUN_TAG={shell_quote(RUN_TAG)}",
+        f"echo LOG_DIR={shell_quote(LOG_DIR)}",
         'echo LOG_FILE="$LOG_FILE"',
         "set -x",
     ]
@@ -103,6 +109,7 @@ def build_train_command() -> str:
         f"export PYTHON_BIN={shell_quote(PYTHON_BIN)}",
         f"export WANDB_DIR={shell_quote(WANDB_DIR)}",
         "export NCCL_DEBUG=INFO",
+        "export RUN_ID_SYNC_TIMEOUT=900",
         "export NNODES=${WORLD_SIZE}",
         "export NODE_RANK=${RANK}",
         "unset RANK WORLD_SIZE LOCAL_RANK",
@@ -124,6 +131,8 @@ def main():
     print("[submit] cluster:", CLUSTER)
     print("[submit] gpu_type:", GPU_TYPE)
     print("[submit] command_mode:", COMMAND_MODE)
+    print("[submit] run_tag:", RUN_TAG)
+    print("[submit] log_dir:", LOG_DIR)
     print("[submit] master: num=1 gpu_num=%s cpu=%s memory=%s disk_m=%s" % (
         GPUS_PER_NODE,
         CPU_PER_NODE,
