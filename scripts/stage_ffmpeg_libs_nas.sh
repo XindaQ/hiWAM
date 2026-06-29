@@ -39,13 +39,25 @@ find_first() {
   done
 }
 
-declare -A libs=(
-  [libavutil.so.59]="libavutil.so.59*"
-  [libavcodec.so.61]="libavcodec.so.61*"
-  [libavformat.so.61]="libavformat.so.61*"
-  [libswscale.so.8]="libswscale.so.8*"
-  [libswresample.so.5]="libswresample.so.5*"
-)
+version_sonames() {
+  case "$1" in
+    7)
+      printf '%s\n' libavutil.so.59 libavcodec.so.61 libavformat.so.61 libswscale.so.8 libswresample.so.5
+      ;;
+    6)
+      printf '%s\n' libavutil.so.58 libavcodec.so.60 libavformat.so.60 libswscale.so.7 libswresample.so.4
+      ;;
+    5)
+      printf '%s\n' libavutil.so.57 libavcodec.so.59 libavformat.so.59 libswscale.so.6 libswresample.so.4
+      ;;
+    4)
+      printf '%s\n' libavutil.so.56 libavcodec.so.58 libavformat.so.58 libswscale.so.5 libswresample.so.3
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
 TMP_LIB="${TARGET_LIB}.tmp.$(hostname).$$"
 rm -rf "${TMP_LIB}"
@@ -54,34 +66,57 @@ mkdir -p "${TMP_LIB}"
 echo "[stage_ffmpeg] target=${TARGET_LIB}"
 echo "[stage_ffmpeg] scan=${scan_dirs[*]}"
 
-missing=0
-for soname in "${!libs[@]}"; do
-  src="$(find_first "${libs[${soname}]}")"
-  if [[ -z "${src}" ]]; then
-    echo "[stage_ffmpeg] missing ${soname} (${libs[${soname}]})" >&2
-    missing=1
-    continue
+selected_version=""
+selected_sonames=()
+selected_sources=()
+
+for version in 7 6 5 4; do
+  current_sonames=()
+  current_sources=()
+  found_all=1
+  while IFS= read -r soname; do
+    src="$(find_first "${soname}*")"
+    if [[ -z "${src}" ]]; then
+      found_all=0
+      break
+    fi
+    current_sonames+=("${soname}")
+    current_sources+=("${src}")
+  done < <(version_sonames "${version}")
+
+  if (( found_all == 1 )); then
+    selected_version="${version}"
+    selected_sonames=("${current_sonames[@]}")
+    selected_sources=("${current_sources[@]}")
+    break
   fi
+done
+
+if [[ -z "${selected_version}" ]]; then
+  rm -rf "${TMP_LIB}"
+  cat >&2 <<'EOF'
+Error: supported FFmpeg shared libraries were not found.
+
+TorchCodec supports FFmpeg 4, 5, 6, and 7. Install or expose one complete
+set of FFmpeg shared libraries in the current container, then rerun:
+  bash scripts/stage_ffmpeg_libs_nas.sh
+
+Or pass a directory that already contains one complete supported set:
+  bash scripts/stage_ffmpeg_libs_nas.sh /path/to/ffmpeg/lib
+EOF
+  exit 1
+fi
+
+echo "[stage_ffmpeg] selected_ffmpeg_major=${selected_version}"
+
+for idx in "${!selected_sonames[@]}"; do
+  soname="${selected_sonames[${idx}]}"
+  src="${selected_sources[${idx}]}"
   base="$(basename "${src}")"
   cp -a "${src}" "${TMP_LIB}/${base}"
   ln -sf "${base}" "${TMP_LIB}/${soname}"
   echo "[stage_ffmpeg] ${soname} <- ${src}"
 done
-
-if (( missing != 0 )); then
-  rm -rf "${TMP_LIB}"
-  cat >&2 <<'EOF'
-Error: FFmpeg 7 shared libraries were not found.
-
-Install or expose FFmpeg 7 libs in the current container, then rerun:
-  bash scripts/stage_ffmpeg_libs_nas.sh
-
-Or pass a directory that already contains libavutil.so.59, libavcodec.so.61,
-libavformat.so.61, libswscale.so.8, and libswresample.so.5:
-  bash scripts/stage_ffmpeg_libs_nas.sh /path/to/ffmpeg7/lib
-EOF
-  exit 1
-fi
 
 mkdir -p "${TARGET_ROOT}"
 rm -rf "${TARGET_LIB}.old"
