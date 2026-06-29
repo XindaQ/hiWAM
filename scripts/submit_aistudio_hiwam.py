@@ -19,6 +19,7 @@ NAS_EXPORT = "26d2d249ad1-jnj31.cn-heyuan-alipay.nas.aliyuncs.com:/"
 PROJECT_DIR = "/team/xinda.qi/project-zhou/code/hiWAM"
 PYTHON_BIN = "/team/xinda.qi/envs/fastwam/bin/python"
 WANDB_DIR = "/team/xinda.qi/project-zhou/wandb"
+LOG_DIR = "/team/xinda.qi/project-zhou/aistudio_job_logs"
 
 # Use "smoke" first to verify AIStudio can start the 2-node/16-GPU job.
 # Switch to "train" after the simple command succeeds.
@@ -49,6 +50,24 @@ def shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
+def build_logged_command(mode: str, commands: list[str]) -> str:
+    log_file = (
+        f"{shell_quote(LOG_DIR)}/hiwam_{mode}_rank_${{RANK:-unknown}}_"
+        "$(hostname)_$(date +%Y%m%d_%H%M%S).log"
+    )
+    prelude = [
+        "set -eo pipefail",
+        f"mkdir -p {shell_quote(NAS_MOUNT_POINT)}",
+        f"(mountpoint -q {shell_quote(NAS_MOUNT_POINT)} || mount -t nfs -o vers=3,nolock,proto=tcp {shell_quote(NAS_EXPORT)} {shell_quote(NAS_MOUNT_POINT)})",
+        f"mkdir -p {shell_quote(LOG_DIR)}",
+        f"LOG_FILE={log_file}",
+        'exec > >(tee -a "$LOG_FILE") 2>&1',
+        'echo LOG_FILE="$LOG_FILE"',
+        "set -x",
+    ]
+    return "bash -lc " + shell_quote("; ".join(prelude + commands))
+
+
 def build_smoke_command() -> str:
     pycheck = (
         "import sys, torch, accelerate, deepspeed; "
@@ -59,13 +78,11 @@ def build_smoke_command() -> str:
         "print('ACCELERATE', accelerate.__version__); "
         "print('DEEPSPEED', deepspeed.__version__)"
     )
-    return " && ".join([
-        "echo AI_ENV MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT WORLD_SIZE=$WORLD_SIZE RANK=$RANK",
+    return build_logged_command("smoke", [
+        "echo AI_ENV MASTER_ADDR=${MASTER_ADDR:-} MASTER_PORT=${MASTER_PORT:-} WORLD_SIZE=${WORLD_SIZE:-} RANK=${RANK:-}",
         "hostname",
         "date",
         "nvidia-smi",
-        f"mkdir -p {shell_quote(NAS_MOUNT_POINT)}",
-        f"(mountpoint -q {shell_quote(NAS_MOUNT_POINT)} || mount -t nfs -o vers=3,nolock,proto=tcp {shell_quote(NAS_EXPORT)} {shell_quote(NAS_MOUNT_POINT)})",
         "mount | grep ' /team ' || true",
         f"ls -ld {shell_quote(PROJECT_DIR)}",
         f"ls -l {shell_quote(PYTHON_BIN)}",
@@ -75,9 +92,7 @@ def build_smoke_command() -> str:
 
 def build_train_command() -> str:
     overrides = " ".join(shell_quote(item) for item in TRAIN_OVERRIDES)
-    return " && ".join([
-        f"mkdir -p {shell_quote(NAS_MOUNT_POINT)}",
-        f"mount -t nfs -o vers=3,nolock,proto=tcp {shell_quote(NAS_EXPORT)} {shell_quote(NAS_MOUNT_POINT)} || true",
+    return build_logged_command("train", [
         "export SSL_NO_VERIFY=1",
         "printenv",
         f"ls -ld {shell_quote(PROJECT_DIR)}",
