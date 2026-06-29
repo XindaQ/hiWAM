@@ -28,6 +28,13 @@ if [[ -n "${FFMPEG_BIN}" && -x "${FFMPEG_BIN}" ]]; then
   export IMAGEIO_FFMPEG_EXE="${FFMPEG_BIN}"
   echo "[launch] ffmpeg=$(command -v ffmpeg)"
 fi
+if [[ "${FASTWAM_TORCHCODEC_CHECK:-warn}" != "off" ]]; then
+  CHECK_ARGS=()
+  if [[ "${FASTWAM_TORCHCODEC_CHECK:-warn}" == "strict" ]]; then
+    CHECK_ARGS+=(--strict)
+  fi
+  "${PYTHON_BIN}" scripts/check_torchcodec_ffmpeg.py "${CHECK_ARGS[@]}"
+fi
 if [[ ! -x "${DEEPSPEED_BIN}" ]]; then
   echo "Error: DEEPSPEED_BIN (${DEEPSPEED_BIN}) is not executable." >&2
   exit 1

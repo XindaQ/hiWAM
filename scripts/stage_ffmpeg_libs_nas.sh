@@ -7,6 +7,7 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FASTWAM_ENV="${FASTWAM_ENV:-$(dirname "$(dirname "${PYTHON_BIN}")")}"
 TARGET_ROOT="${FASTWAM_FFMPEG_ROOT:-${FASTWAM_ENV}/ffmpeg7}"
 TARGET_LIB="${TARGET_ROOT}/lib"
@@ -161,10 +162,7 @@ fi
 mv "${TMP_LIB}" "${TARGET_LIB}"
 
 echo "[stage_ffmpeg] validating torchcodec"
-LD_LIBRARY_PATH="${TARGET_LIB}:${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}" "${PYTHON_BIN}" - <<'PY'
-from torchcodec.decoders import VideoDecoder
-print("torchcodec ok")
-PY
+LD_LIBRARY_PATH="${TARGET_LIB}:${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}" "${PYTHON_BIN}" "${SCRIPT_DIR}/check_torchcodec_ffmpeg.py" --strict --prefix "[stage_ffmpeg][torchcodec]"
 
 echo "[stage_ffmpeg] done"
 echo "[stage_ffmpeg] FASTWAM_FFMPEG_LIB_DIR=${TARGET_LIB}"
