@@ -41,7 +41,7 @@ MEMORY_MB_PER_NODE = 1572864
 DISK_MB_PER_NODE = 1638400
 
 # Keep the original config files untouched; override runtime knobs here.
-TRAIN_SCRIPT = "scripts/train_zero1.sh"
+TRAIN_SCRIPT = "scripts/train_zero1_aistudio.sh"
 COMM_SCRIPT = "scripts/nccl_comm_smoke.py"
 TRAIN_TASK = os.environ.get("TRAIN_TASK", "libero_idm_2cam224_1e-4")
 PER_GPU_BATCH_SIZE = 8

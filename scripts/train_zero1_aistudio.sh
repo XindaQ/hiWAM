@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NPROC_PER_NODE="${1:?Usage: bash scripts/train_zero1.sh <nproc_per_node> [hydra_overrides...]}"
+NPROC_PER_NODE="${1:?Usage: bash scripts/train_zero1_aistudio.sh <nproc_per_node> [hydra_overrides...]}"
 shift
 
 PYTHON_BIN="${PYTHON_BIN:-/team/xinda.qi/envs/fastwam/bin/python}"
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "Error: PYTHON_BIN (${PYTHON_BIN}) is not executable. Set PYTHON_BIN to the intended environment python." >&2
+  exit 1
+fi
+FASTWAM_ENV="${FASTWAM_ENV:-$(dirname "$(dirname "${PYTHON_BIN}")")}"
+DEEPSPEED_BIN="${DEEPSPEED_BIN:-${FASTWAM_ENV}/bin/deepspeed}"
+export FASTWAM_ENV DEEPSPEED_BIN
+export PATH="${FASTWAM_ENV}/bin:${PATH}"
+export LD_LIBRARY_PATH="${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}"
+if [[ ! -x "${DEEPSPEED_BIN}" ]]; then
+  echo "Error: DEEPSPEED_BIN (${DEEPSPEED_BIN}) is not executable." >&2
   exit 1
 fi
 export WANDB_DIR="${WANDB_DIR:-/team/xinda.qi/project-zhou/wandb}"
@@ -27,6 +36,7 @@ if ! is_integer "${NPROC_PER_NODE}" || ! is_integer "${NUM_MACHINES}" || ! is_in
 fi
 
 TOTAL_PROCESSES=$((NPROC_PER_NODE * NUM_MACHINES))
+DEEPSPEED_MULTINODE_LAUNCHER="${DEEPSPEED_MULTINODE_LAUNCHER:-standard}"
 
 extract_task_basename() {
   local cfg="$1"
@@ -114,7 +124,8 @@ PY
   fi
 fi
 
-echo "[launch] nproc_per_node=${NPROC_PER_NODE} total_processes=${TOTAL_PROCESSES} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK} main_process=${MAIN_PROCESS_IP}:${MAIN_PROCESS_PORT} run_id=${RUN_ID}"
+echo "[launch] nproc_per_node=${NPROC_PER_NODE} total_processes=${TOTAL_PROCESSES} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK} main_process=${MAIN_PROCESS_IP}:${MAIN_PROCESS_PORT} run_id=${RUN_ID} deepspeed_multinode_launcher=${DEEPSPEED_MULTINODE_LAUNCHER}"
+echo "[launch] python_bin=${PYTHON_BIN} fastwam_env=${FASTWAM_ENV} deepspeed_bin=${DEEPSPEED_BIN} path_deepspeed=$(command -v deepspeed || true)"
 
 "${PYTHON_BIN}" -m accelerate.commands.launch \
   --config_file scripts/accelerate_configs/accelerate_zero1_ds.yaml \
@@ -123,6 +134,7 @@ echo "[launch] nproc_per_node=${NPROC_PER_NODE} total_processes=${TOTAL_PROCESSE
   --machine_rank "${MACHINE_RANK}" \
   --main_process_ip "${MAIN_PROCESS_IP}" \
   --main_process_port "${MAIN_PROCESS_PORT}" \
+  --deepspeed_multinode_launcher "${DEEPSPEED_MULTINODE_LAUNCHER}" \
   scripts/train.py \
   "output_dir=./runs/${TASK_BASENAME}/${RUN_ID}" \
   "wandb.name=${TASK_BASENAME}" \
