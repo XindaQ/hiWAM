@@ -9,6 +9,15 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "Error: PYTHON_BIN (${PYTHON_BIN}) is not executable. Set PYTHON_BIN to the intended environment python." >&2
   exit 1
 fi
+FASTWAM_ENV="${FASTWAM_ENV:-$(dirname "$(dirname "${PYTHON_BIN}")")}"
+DEEPSPEED_BIN="${DEEPSPEED_BIN:-${FASTWAM_ENV}/bin/deepspeed}"
+export FASTWAM_ENV DEEPSPEED_BIN
+export PATH="${FASTWAM_ENV}/bin:${PATH}"
+export LD_LIBRARY_PATH="${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}"
+if [[ ! -x "${DEEPSPEED_BIN}" ]]; then
+  echo "Error: DEEPSPEED_BIN (${DEEPSPEED_BIN}) is not executable." >&2
+  exit 1
+fi
 export WANDB_DIR="${WANDB_DIR:-/team/xinda.qi/project-zhou/wandb}"
 mkdir -p "${WANDB_DIR}"
 EXTRA_ARGS=("$@")
@@ -115,8 +124,9 @@ PY
 fi
 
 echo "[launch] nproc_per_node=${NPROC_PER_NODE} total_processes=${TOTAL_PROCESSES} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK} main_process=${MAIN_PROCESS_IP}:${MAIN_PROCESS_PORT} run_id=${RUN_ID}"
+echo "[launch] python_bin=${PYTHON_BIN} fastwam_env=${FASTWAM_ENV} deepspeed_bin=${DEEPSPEED_BIN} path_deepspeed=$(command -v deepspeed || true)"
 
-"${PYTHON_BIN}" scripts/accelerate_launch_abs_deepspeed.py \
+"${PYTHON_BIN}" -m accelerate.commands.launch \
   --config_file scripts/accelerate_configs/accelerate_zero1_ds.yaml \
   --num_processes "${TOTAL_PROCESSES}" \
   --num_machines "${NUM_MACHINES}" \

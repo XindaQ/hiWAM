@@ -108,6 +108,7 @@ def build_train_command() -> str:
         f"cd {shell_quote(PROJECT_DIR)}",
         f"export PYTHON_BIN={shell_quote(PYTHON_BIN)}",
         'export FASTWAM_ENV="$(dirname "$(dirname "$PYTHON_BIN")")"',
+        'export DEEPSPEED_BIN="$FASTWAM_ENV/bin/deepspeed"',
         'unset PYTHONPATH PythonPath',
         'export PYTHONPATH="$PWD/src"',
         'export PATH="$FASTWAM_ENV/bin:$PATH"',
@@ -121,11 +122,13 @@ def build_train_command() -> str:
         "export NCCL_DEBUG=INFO",
         "export RUN_ID_SYNC_TIMEOUT=900",
         'echo FASTWAM_ENV="$FASTWAM_ENV"',
+        'echo DEEPSPEED_BIN="$DEEPSPEED_BIN"',
         'echo PATH="$PATH"',
         'echo PYTHONPATH="$PYTHONPATH"',
         'echo LD_LIBRARY_PATH="$LD_LIBRARY_PATH"',
         "command -v python",
         "command -v deepspeed",
+        'test -x "$DEEPSPEED_BIN"',
         (
             f"{shell_quote(PYTHON_BIN)} -c "
             + shell_quote(
@@ -133,6 +136,7 @@ def build_train_command() -> str:
                 "print('PYTHON_EXE', sys.executable); "
                 "print('PYTHON_PREFIX', sys.prefix); "
                 "print('PYTHON_BASE_PREFIX', sys.base_prefix); "
+                "print('DEEPSPEED_BIN_ENV', os.environ.get('DEEPSPEED_BIN')); "
                 "print('WHICH_DEEPSPEED', shutil.which('deepspeed')); "
                 "print('ENV_CONDA_PREFIX', os.environ.get('CONDA_PREFIX')); "
                 "print('ENV_PYTHONPATH', os.environ.get('PYTHONPATH')); "
