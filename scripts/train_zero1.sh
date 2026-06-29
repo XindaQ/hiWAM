@@ -116,7 +116,7 @@ fi
 
 echo "[launch] nproc_per_node=${NPROC_PER_NODE} total_processes=${TOTAL_PROCESSES} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK} main_process=${MAIN_PROCESS_IP}:${MAIN_PROCESS_PORT} run_id=${RUN_ID}"
 
-"${PYTHON_BIN}" -m accelerate.commands.launch \
+"${PYTHON_BIN}" scripts/accelerate_launch_abs_deepspeed.py \
   --config_file scripts/accelerate_configs/accelerate_zero1_ds.yaml \
   --num_processes "${TOTAL_PROCESSES}" \
   --num_machines "${NUM_MACHINES}" \
