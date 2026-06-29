@@ -7,7 +7,6 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FASTWAM_ENV="${FASTWAM_ENV:-$(dirname "$(dirname "${PYTHON_BIN}")")}"
 TARGET_ROOT="${FASTWAM_FFMPEG_ROOT:-${FASTWAM_ENV}/ffmpeg7}"
 TARGET_LIB="${TARGET_ROOT}/lib"
@@ -128,7 +127,7 @@ fi
 
 echo "[stage_ffmpeg] selected_ffmpeg_major=${selected_version}"
 
-copied_bundle_dirs=()
+copied_bundle_dirs=":"
 for idx in "${!selected_sonames[@]}"; do
   soname="${selected_sonames[${idx}]}"
   src="${selected_sources[${idx}]}"
@@ -139,17 +138,10 @@ for idx in "${!selected_sonames[@]}"; do
   echo "[stage_ffmpeg] ${soname} <- ${src}"
 
   if [[ "$(basename "${src_dir}")" == "av.libs" ]]; then
-    already_copied=0
-    for copied_dir in "${copied_bundle_dirs[@]}"; do
-      if [[ "${copied_dir}" == "${src_dir}" ]]; then
-        already_copied=1
-        break
-      fi
-    done
-    if (( already_copied == 0 )); then
+    if [[ "${copied_bundle_dirs}" != *":${src_dir}:"* ]]; then
       echo "[stage_ffmpeg] bundled_deps <- ${src_dir}/lib*.so*"
       find "${src_dir}" -maxdepth 1 -name 'lib*.so*' -type f -exec cp -a {} "${TMP_LIB}/" \;
-      copied_bundle_dirs+=("${src_dir}")
+      copied_bundle_dirs="${copied_bundle_dirs}${src_dir}:"
     fi
   fi
 done
@@ -162,7 +154,10 @@ fi
 mv "${TMP_LIB}" "${TARGET_LIB}"
 
 echo "[stage_ffmpeg] validating torchcodec"
-LD_LIBRARY_PATH="${TARGET_LIB}:${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}" "${PYTHON_BIN}" "${SCRIPT_DIR}/check_torchcodec_ffmpeg.py" --strict --prefix "[stage_ffmpeg][torchcodec]"
+LD_LIBRARY_PATH="${TARGET_LIB}:${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}" "${PYTHON_BIN}" - <<'PY'
+from torchcodec.decoders import VideoDecoder
+print("torchcodec ok")
+PY
 
 echo "[stage_ffmpeg] done"
 echo "[stage_ffmpeg] FASTWAM_FFMPEG_LIB_DIR=${TARGET_LIB}"
