@@ -5,7 +5,7 @@ This submitter intentionally keeps the project training configs unchanged.
 Training-specific knobs are passed as Hydra overrides in `TRAIN_OVERRIDES`.
 """
 
-from pypai.conf import ExecConf, KMConf
+from pypai.conf import ExecConf, GpuType, KMConf
 from pypai.job import PythonJobBuilder
 
 
@@ -28,9 +28,7 @@ COMMAND_MODE = "smoke"
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
 GPUS_PER_NODE = 8
 WORKER_NUM = 1
-# The current aii-pypai GpuType enum only has P100/A10/V100/A100. For the
-# dedicated agenth20 pool, let k8s_app_name + gpu_num select H20 resources.
-GPU_TYPE = None
+GPU_TYPE = GpuType.H20
 CPU_PER_NODE = 128
 MEMORY_MB_PER_NODE = 1572864
 DISK_MB_PER_NODE = 1638400
@@ -131,8 +129,7 @@ def main():
         gpu_num=GPUS_PER_NODE,
         disk_m=DISK_MB_PER_NODE,
     )
-    if GPU_TYPE is not None:
-        exec_kwargs["gpu_type"] = GPU_TYPE
+    exec_kwargs["gpu_type"] = GPU_TYPE
 
     master = ExecConf(num=1, **exec_kwargs)
     worker = ExecConf(num=WORKER_NUM, **exec_kwargs)
