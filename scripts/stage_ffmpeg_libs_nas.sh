@@ -60,16 +60,16 @@ find_first() {
 version_sonames() {
   case "$1" in
     7)
-      printf '%s\n' libavutil.so.59 libavcodec.so.61 libavformat.so.61 libswscale.so.8 libswresample.so.5
+      printf '%s\n' libavutil.so.59 libavcodec.so.61 libavformat.so.61 libavdevice.so.61 libavfilter.so.10 libswscale.so.8 libswresample.so.5
       ;;
     6)
-      printf '%s\n' libavutil.so.58 libavcodec.so.60 libavformat.so.60 libswscale.so.7 libswresample.so.4
+      printf '%s\n' libavutil.so.58 libavcodec.so.60 libavformat.so.60 libavdevice.so.60 libavfilter.so.9 libswscale.so.7 libswresample.so.4
       ;;
     5)
-      printf '%s\n' libavutil.so.57 libavcodec.so.59 libavformat.so.59 libswscale.so.6 libswresample.so.4
+      printf '%s\n' libavutil.so.57 libavcodec.so.59 libavformat.so.59 libavdevice.so.59 libavfilter.so.8 libswscale.so.6 libswresample.so.4
       ;;
     4)
-      printf '%s\n' libavutil.so.56 libavcodec.so.58 libavformat.so.58 libswscale.so.5 libswresample.so.3
+      printf '%s\n' libavutil.so.56 libavcodec.so.58 libavformat.so.58 libavdevice.so.58 libavfilter.so.7 libswscale.so.5 libswresample.so.3
       ;;
     *)
       return 1
