@@ -127,13 +127,30 @@ fi
 
 echo "[stage_ffmpeg] selected_ffmpeg_major=${selected_version}"
 
+copied_bundle_dirs=()
 for idx in "${!selected_sonames[@]}"; do
   soname="${selected_sonames[${idx}]}"
   src="${selected_sources[${idx}]}"
+  src_dir="$(dirname "${src}")"
   base="$(basename "${src}")"
   cp -a "${src}" "${TMP_LIB}/${base}"
   ln -sf "${base}" "${TMP_LIB}/${soname}"
   echo "[stage_ffmpeg] ${soname} <- ${src}"
+
+  if [[ "$(basename "${src_dir}")" == "av.libs" ]]; then
+    already_copied=0
+    for copied_dir in "${copied_bundle_dirs[@]}"; do
+      if [[ "${copied_dir}" == "${src_dir}" ]]; then
+        already_copied=1
+        break
+      fi
+    done
+    if (( already_copied == 0 )); then
+      echo "[stage_ffmpeg] bundled_deps <- ${src_dir}/lib*.so*"
+      find "${src_dir}" -maxdepth 1 -name 'lib*.so*' -type f -exec cp -a {} "${TMP_LIB}/" \;
+      copied_bundle_dirs+=("${src_dir}")
+    fi
+  fi
 done
 
 mkdir -p "${TARGET_ROOT}"
