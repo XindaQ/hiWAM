@@ -13,7 +13,13 @@ FASTWAM_ENV="${FASTWAM_ENV:-$(dirname "$(dirname "${PYTHON_BIN}")")}"
 DEEPSPEED_BIN="${DEEPSPEED_BIN:-${FASTWAM_ENV}/bin/deepspeed}"
 export FASTWAM_ENV DEEPSPEED_BIN
 export PATH="${FASTWAM_ENV}/bin:${PATH}"
-export LD_LIBRARY_PATH="${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}"
+FASTWAM_FFMPEG_LIB_DIR="${FASTWAM_FFMPEG_LIB_DIR:-${FASTWAM_ENV}/ffmpeg7/lib}"
+if [[ -d "${FASTWAM_FFMPEG_LIB_DIR}" ]]; then
+  export LD_LIBRARY_PATH="${FASTWAM_FFMPEG_LIB_DIR}:${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}"
+  echo "[launch] ffmpeg_lib=${FASTWAM_FFMPEG_LIB_DIR}"
+else
+  export LD_LIBRARY_PATH="${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}"
+fi
 FFMPEG_BIN="$("${PYTHON_BIN}" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())' 2>/dev/null || true)"
 if [[ -n "${FFMPEG_BIN}" && -x "${FFMPEG_BIN}" ]]; then
   mkdir -p /tmp/hiwam_bin
