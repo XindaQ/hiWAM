@@ -54,7 +54,7 @@ def main() -> None:
 
     for size_mb in [int(item) for item in args.sizes_mb.split(",") if item.strip()]:
         numel = size_mb * 1024 * 1024 // 4
-        tensor = torch.ones(numel, device=device, dtype=torch.float32)
+        tensor = torch.zeros(numel, device=device, dtype=torch.float32)
 
         for _ in range(args.warmup):
             dist.all_reduce(tensor)

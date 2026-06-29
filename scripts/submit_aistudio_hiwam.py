@@ -16,7 +16,7 @@ from pypai.job import PythonJobBuilder
 # AIStudio environment.
 IMAGE = "reg.docker.alibaba-inc.com/aii/aistudio:13880163-20250915220702"
 K8S_APP_NAME = "agenth20"
-CLUSTER = "auto"
+CLUSTER = os.environ.get("AISTUDIO_CLUSTER", "auto")
 KM_POOL = "kubemaker"
 NAS_MOUNT_POINT = "/team"
 NAS_EXPORT = "26d2d249ad1-jnj31.cn-heyuan-alipay.nas.aliyuncs.com:/"
@@ -32,7 +32,7 @@ COMMAND_MODE = os.environ.get("COMMAND_MODE", "train")
 # Resource shape. For 2 nodes x 8 GPUs, keep WORKER_NUM = 1.
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
 GPUS_PER_NODE = 8
-WORKER_NUM = 1
+WORKER_NUM = int(os.environ.get("WORKER_NUM", "1"))
 NODE_COUNT = WORKER_NUM + 1
 TOTAL_GPUS = NODE_COUNT * GPUS_PER_NODE
 GPU_TYPE = GpuType.H20
@@ -48,6 +48,9 @@ PER_GPU_BATCH_SIZE = 8
 MAX_STEPS = 20
 NUM_WORKERS = 4
 ZERO_STAGE = 1
+COMM_SIZES_MB = os.environ.get("COMM_SIZES_MB", "1,16,64,256,512")
+COMM_WARMUP = int(os.environ.get("COMM_WARMUP", "5"))
+COMM_ITERS = int(os.environ.get("COMM_ITERS", "20"))
 if "uncond" in TRAIN_TASK and os.environ.get("ALLOW_UNCOND", "0") != "1":
     raise ValueError(
         f"Refusing to submit uncond task by default: {TRAIN_TASK}. "
@@ -156,7 +159,10 @@ def build_comm_command() -> str:
             f"--node_rank \"${{NODE_RANK}}\" "
             f"--master_addr \"${{MASTER_ADDR}}\" "
             f"--master_port \"${{MASTER_PORT}}\" "
-            f"{shell_quote(COMM_SCRIPT)} --sizes-mb 1,16,64,256,512 --warmup 5 --iters 20"
+            f"{shell_quote(COMM_SCRIPT)} "
+            f"--sizes-mb {shell_quote(COMM_SIZES_MB)} "
+            f"--warmup {COMM_WARMUP} "
+            f"--iters {COMM_ITERS}"
         ),
     ])
 
@@ -238,6 +244,10 @@ def main():
     print("[submit] train_task:", TRAIN_TASK)
     print("[submit] per_gpu_batch_size:", PER_GPU_BATCH_SIZE)
     print("[submit] max_steps:", MAX_STEPS)
+    if COMMAND_MODE == "comm":
+        print("[submit] comm_sizes_mb:", COMM_SIZES_MB)
+        print("[submit] comm_warmup:", COMM_WARMUP)
+        print("[submit] comm_iters:", COMM_ITERS)
     print("[submit] master: num=1 gpu_num=%s cpu=%s memory=%s disk_m=%s" % (
         GPUS_PER_NODE,
         CPU_PER_NODE,
