@@ -26,8 +26,12 @@ WANDB_DIR = "/team/xinda.qi/project-zhou/wandb"
 LOG_ROOT = "/team/xinda.qi/project-zhou/aistudio_job_logs"
 
 # Use "smoke" to verify AIStudio can start all nodes; "comm" for NCCL/RDMA diagnostics;
-# use "train" for the 20-step training test.
-COMMAND_MODE = os.environ.get("COMMAND_MODE", "train")
+# use "train" for the 20-step training test. macOS may set COMMAND_MODE=unix2003,
+# so prefer the AIStudio-specific name and only accept known legacy values.
+_LEGACY_COMMAND_MODE = os.environ.get("COMMAND_MODE")
+COMMAND_MODE = os.environ.get("AISTUDIO_COMMAND_MODE")
+if COMMAND_MODE is None:
+    COMMAND_MODE = _LEGACY_COMMAND_MODE if _LEGACY_COMMAND_MODE in {"smoke", "comm", "train"} else "train"
 
 # Resource shape. For 2 nodes x 8 GPUs, keep WORKER_NUM = 1.
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
@@ -41,12 +45,13 @@ MEMORY_MB_PER_NODE = 1572864
 DISK_MB_PER_NODE = 1638400
 
 # Keep the original config files untouched; override runtime knobs here.
-TRAIN_SCRIPT = "scripts/train_zero1_aistudio.sh"
+TRAIN_SCRIPT = os.environ.get("TRAIN_SCRIPT", "scripts/train_zero1_aistudio_local_ckpt.sh")
 COMM_SCRIPT = "scripts/nccl_comm_smoke.py"
 TRAIN_TASK = os.environ.get("TRAIN_TASK", "libero_idm_2cam224_1e-4")
-PER_GPU_BATCH_SIZE = 8
-MAX_STEPS = 20
-NUM_WORKERS = 4
+PER_GPU_BATCH_SIZE = int(os.environ.get("PER_GPU_BATCH_SIZE", "8"))
+GRADIENT_ACCUMULATION_STEPS = int(os.environ.get("GRADIENT_ACCUMULATION_STEPS", "1"))
+MAX_STEPS = os.environ.get("MAX_STEPS", "20").strip()
+NUM_WORKERS = int(os.environ.get("NUM_WORKERS", "4"))
 ZERO_STAGE = 1
 COMM_SIZES_MB = os.environ.get("COMM_SIZES_MB", "1,16,64,256,512")
 COMM_WARMUP = int(os.environ.get("COMM_WARMUP", "5"))
@@ -60,18 +65,21 @@ RUN_TAG = (
     f"{datetime.now():%Y%m%d_%H%M%S}_"
     f"{COMMAND_MODE}_"
     f"{NODE_COUNT}n{TOTAL_GPUS}g_"
-    f"bs{PER_GPU_BATCH_SIZE}_s{MAX_STEPS}_z{ZERO_STAGE}_"
+    f"bs{PER_GPU_BATCH_SIZE}_acc{GRADIENT_ACCUMULATION_STEPS}_"
+    f"s{MAX_STEPS if MAX_STEPS else 'full'}_z{ZERO_STAGE}_"
     f"{uuid4().hex[:6]}"
 )
 LOG_DIR = f"{LOG_ROOT}/{RUN_TAG}"
 TRAIN_OVERRIDES = [
     f"task={TRAIN_TASK}",
     f"batch_size={PER_GPU_BATCH_SIZE}",
-    f"max_steps={MAX_STEPS}",
+    f"gradient_accumulation_steps={GRADIENT_ACCUMULATION_STEPS}",
     f"num_workers={NUM_WORKERS}",
     "wandb.mode=offline",
-    f"output_dir=./runs/{TRAIN_TASK}/{RUN_TAG}",
+    f"wandb.name={RUN_TAG}",
 ]
+if MAX_STEPS:
+    TRAIN_OVERRIDES.append(f"max_steps={MAX_STEPS}")
 
 
 def shell_quote(value: str) -> str:
@@ -171,51 +179,21 @@ def build_train_command() -> str:
     overrides = " ".join(shell_quote(item) for item in TRAIN_OVERRIDES)
     return build_logged_command("train", [
         "export SSL_NO_VERIFY=1",
-        "printenv",
+        "echo AI_ENV MASTER_ADDR=${MASTER_ADDR:-} MASTER_PORT=${MASTER_PORT:-} WORLD_SIZE=${WORLD_SIZE:-} RANK=${RANK:-}",
+        "hostname",
+        "date",
+        "nvidia-smi",
+        "mount | grep ' /team ' || true",
         f"ls -ld {shell_quote(PROJECT_DIR)}",
         f"ls -l {shell_quote(PYTHON_BIN)}",
         f"cd {shell_quote(PROJECT_DIR)}",
         f"export PYTHON_BIN={shell_quote(PYTHON_BIN)}",
-        'export FASTWAM_ENV="$(dirname "$(dirname "$PYTHON_BIN")")"',
-        'export DEEPSPEED_BIN="$FASTWAM_ENV/bin/deepspeed"',
-        'unset PYTHONPATH PythonPath',
-        'export PYTHONPATH="$PWD/src"',
-        'export PATH="$FASTWAM_ENV/bin:$PATH"',
-        'export LD_LIBRARY_PATH="$FASTWAM_ENV/lib:${LD_LIBRARY_PATH:-}"',
-        'export VIRTUAL_ENV="$FASTWAM_ENV"',
-        'export CONDA_PREFIX="$FASTWAM_ENV"',
-        'export CONDA_DEFAULT_ENV="$(basename "$FASTWAM_ENV")"',
-        "export PYTHONNOUSERSITE=1",
-        "hash -r",
         f"export WANDB_DIR={shell_quote(WANDB_DIR)}",
+        f"export FASTWAM_SOURCE_CHECKPOINT_DIR={shell_quote(PROJECT_DIR + '/checkpoints')}",
+        "export FASTWAM_LOCAL_CHECKPOINT_DIR=/tmp/hiwam_checkpoints",
         "export NCCL_DEBUG=WARN",
         "export RUN_ID_SYNC_TIMEOUT=900",
-        'echo FASTWAM_ENV="$FASTWAM_ENV"',
-        'echo DEEPSPEED_BIN="$DEEPSPEED_BIN"',
-        'echo PATH="$PATH"',
-        'echo PYTHONPATH="$PYTHONPATH"',
-        'echo LD_LIBRARY_PATH="$LD_LIBRARY_PATH"',
-        "command -v python",
-        "command -v deepspeed",
-        'test -x "$DEEPSPEED_BIN"',
-        (
-            f"{shell_quote(PYTHON_BIN)} -c "
-            + shell_quote(
-                "import os, shutil, sys; "
-                "print('PYTHON_EXE', sys.executable); "
-                "print('PYTHON_PREFIX', sys.prefix); "
-                "print('PYTHON_BASE_PREFIX', sys.base_prefix); "
-                "print('DEEPSPEED_BIN_ENV', os.environ.get('DEEPSPEED_BIN')); "
-                "print('WHICH_DEEPSPEED', shutil.which('deepspeed')); "
-                "print('ENV_CONDA_PREFIX', os.environ.get('CONDA_PREFIX')); "
-                "print('ENV_PYTHONPATH', os.environ.get('PYTHONPATH')); "
-                "print('SYS_PATH_HEAD', sys.path[:8]); "
-                "import accelerate, deepspeed, torch; "
-                "print('ACCELERATE_FILE', accelerate.__file__); "
-                "print('DEEPSPEED_FILE', deepspeed.__file__); "
-                "print('TORCH_FILE', torch.__file__)"
-            )
-        ),
+        f"export RUN_ID={shell_quote(RUN_TAG)}",
         "export NNODES=${WORLD_SIZE}",
         "export NODE_RANK=${RANK}",
         "unset RANK WORLD_SIZE LOCAL_RANK",
@@ -243,7 +221,9 @@ def main():
     print("[submit] log_dir:", LOG_DIR)
     print("[submit] train_task:", TRAIN_TASK)
     print("[submit] per_gpu_batch_size:", PER_GPU_BATCH_SIZE)
+    print("[submit] gradient_accumulation_steps:", GRADIENT_ACCUMULATION_STEPS)
     print("[submit] max_steps:", MAX_STEPS)
+    print("[submit] train_script:", TRAIN_SCRIPT)
     if COMMAND_MODE == "comm":
         print("[submit] comm_sizes_mb:", COMM_SIZES_MB)
         print("[submit] comm_warmup:", COMM_WARMUP)
