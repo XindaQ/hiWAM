@@ -196,7 +196,7 @@ def build_train_command() -> str:
         "export FASTWAM_LOCAL_CHECKPOINT_DIR=/tmp/hiwam_checkpoints",
         "export FASTWAM_OUTPUT_ROOT=runs/aistudio_multinode",
         "export NCCL_DEBUG=WARN",
-        "export RUN_ID_SYNC_TIMEOUT=900",
+        "export RUN_ID_SYNC_TIMEOUT=1800",
         f"export RUN_ID={shell_quote(RUN_TAG)}",
         "export NNODES=${WORLD_SIZE}",
         "export NODE_RANK=${RANK}",
