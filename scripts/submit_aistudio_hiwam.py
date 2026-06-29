@@ -160,7 +160,7 @@ def main():
         rdma=True,
         host_network=True,
         k8s_app_name=K8S_APP_NAME,
-        k8s_priority="low",
+        k8s_priority="high",
         tag="type=SFT,basemodel=Wan2.2-TI2V-5B",
         platform="kubemaker",
     )
