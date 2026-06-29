@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-cd "${PROJECT_DIR}"
-
 NPROC_PER_NODE="${1:?Usage: bash scripts/train_zero1.sh <nproc_per_node> [hydra_overrides...]}"
 shift
 
@@ -15,50 +11,9 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 FASTWAM_ENV="${FASTWAM_ENV:-$(dirname "$(dirname "${PYTHON_BIN}")")}"
 DEEPSPEED_BIN="${DEEPSPEED_BIN:-${FASTWAM_ENV}/bin/deepspeed}"
-
-if [[ "${PRESERVE_PYTHONPATH:-0}" != "1" ]]; then
-  unset PYTHONPATH PythonPath
-fi
-
-export PYTHON_BIN FASTWAM_ENV DEEPSPEED_BIN
-CHECKPOINT_SOURCE_DIR="${PROJECT_DIR}/checkpoints"
-if [[ -n "${FASTWAM_LOCAL_CHECKPOINT_DIR:-}" ]]; then
-  READY_MARKER="${FASTWAM_LOCAL_CHECKPOINT_DIR}/.fastwam_stage_complete"
-  if [[ ! -f "${READY_MARKER}" ]]; then
-    if [[ -d "${FASTWAM_LOCAL_CHECKPOINT_DIR}" ]] && [[ -n "$(find "${FASTWAM_LOCAL_CHECKPOINT_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-      echo "Error: FASTWAM_LOCAL_CHECKPOINT_DIR exists but is not marked complete: ${FASTWAM_LOCAL_CHECKPOINT_DIR}" >&2
-      echo "Choose a new empty local directory, or verify/remove the partial directory yourself." >&2
-      exit 1
-    fi
-
-    STAGE_TMP="${FASTWAM_LOCAL_CHECKPOINT_DIR}.tmp.$(hostname).$$"
-    if [[ -e "${STAGE_TMP}" ]]; then
-      echo "Error: temporary staging path already exists: ${STAGE_TMP}" >&2
-      exit 1
-    fi
-    mkdir -p "${STAGE_TMP}"
-    echo "[launch] staging checkpoints safely ${CHECKPOINT_SOURCE_DIR}/ -> ${FASTWAM_LOCAL_CHECKPOINT_DIR}/"
-    tar -C "${CHECKPOINT_SOURCE_DIR}" -cf - . | tar -C "${STAGE_TMP}" -xf -
-    touch "${STAGE_TMP}/.fastwam_stage_complete"
-    rmdir "${FASTWAM_LOCAL_CHECKPOINT_DIR}" 2>/dev/null || true
-    mv "${STAGE_TMP}" "${FASTWAM_LOCAL_CHECKPOINT_DIR}"
-  else
-    echo "[launch] using staged checkpoints ${FASTWAM_LOCAL_CHECKPOINT_DIR}/"
-  fi
-  export DIFFSYNTH_MODEL_BASE_PATH="${FASTWAM_LOCAL_CHECKPOINT_DIR}"
-else
-  export DIFFSYNTH_MODEL_BASE_PATH="${DIFFSYNTH_MODEL_BASE_PATH:-${CHECKPOINT_SOURCE_DIR}}"
-fi
-export PYTHONPATH="${PROJECT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}"
+export FASTWAM_ENV DEEPSPEED_BIN
 export PATH="${FASTWAM_ENV}/bin:${PATH}"
 export LD_LIBRARY_PATH="${FASTWAM_ENV}/lib:${LD_LIBRARY_PATH:-}"
-export VIRTUAL_ENV="${FASTWAM_ENV}"
-export CONDA_PREFIX="${FASTWAM_ENV}"
-export CONDA_DEFAULT_ENV="$(basename "${FASTWAM_ENV}")"
-export PYTHONNOUSERSITE="${PYTHONNOUSERSITE:-1}"
-export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
-hash -r
-
 if [[ ! -x "${DEEPSPEED_BIN}" ]]; then
   echo "Error: DEEPSPEED_BIN (${DEEPSPEED_BIN}) is not executable." >&2
   exit 1
@@ -169,13 +124,8 @@ PY
   fi
 fi
 
-RUN_DIR="./runs/${TASK_BASENAME}/${RUN_ID}"
-mkdir -p "${RUN_DIR}"
-
 echo "[launch] nproc_per_node=${NPROC_PER_NODE} total_processes=${TOTAL_PROCESSES} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK} main_process=${MAIN_PROCESS_IP}:${MAIN_PROCESS_PORT} run_id=${RUN_ID} deepspeed_multinode_launcher=${DEEPSPEED_MULTINODE_LAUNCHER}"
 echo "[launch] python_bin=${PYTHON_BIN} fastwam_env=${FASTWAM_ENV} deepspeed_bin=${DEEPSPEED_BIN} path_deepspeed=$(command -v deepspeed || true)"
-echo "[launch] diffsynth_model_base_path=${DIFFSYNTH_MODEL_BASE_PATH}"
-echo "[launch] run_dir=${RUN_DIR} hydra_log=${RUN_DIR}/train.log"
 
 "${PYTHON_BIN}" -m accelerate.commands.launch \
   --config_file scripts/accelerate_configs/accelerate_zero1_ds.yaml \
@@ -186,7 +136,6 @@ echo "[launch] run_dir=${RUN_DIR} hydra_log=${RUN_DIR}/train.log"
   --main_process_port "${MAIN_PROCESS_PORT}" \
   --deepspeed_multinode_launcher "${DEEPSPEED_MULTINODE_LAUNCHER}" \
   scripts/train.py \
-  "output_dir=${RUN_DIR}" \
-  "hydra.run.dir=${RUN_DIR}" \
+  "output_dir=./runs/${TASK_BASENAME}/${RUN_ID}" \
   "wandb.name=${TASK_BASENAME}" \
   "${EXTRA_ARGS[@]}"
