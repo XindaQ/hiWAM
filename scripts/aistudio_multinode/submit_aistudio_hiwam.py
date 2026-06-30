@@ -43,14 +43,15 @@ if COMMAND_MODE is None:
 
 # Resource shape. For 2 nodes x 8 GPUs, keep WORKER_NUM = 1.
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
-GPUS_PER_NODE = 8
+# RDMA diagnostics can override these to a tiny shape, e.g. GPUS_PER_NODE=1.
+GPUS_PER_NODE = int(os.environ.get("GPUS_PER_NODE", "8"))
 WORKER_NUM = int(os.environ.get("WORKER_NUM", "1"))
 NODE_COUNT = WORKER_NUM + 1
 TOTAL_GPUS = NODE_COUNT * GPUS_PER_NODE
 GPU_TYPE = GpuType.H20
-CPU_PER_NODE = 128
-MEMORY_MB_PER_NODE = 1572864
-DISK_MB_PER_NODE = 1638400
+CPU_PER_NODE = int(os.environ.get("CPU_PER_NODE", "128"))
+MEMORY_MB_PER_NODE = int(os.environ.get("MEMORY_MB_PER_NODE", "1572864"))
+DISK_MB_PER_NODE = int(os.environ.get("DISK_MB_PER_NODE", "1638400"))
 
 # Keep the original config files untouched; override runtime knobs here.
 TRAIN_SCRIPT = os.environ.get(
@@ -155,15 +156,20 @@ def build_rdma_command() -> str:
         "nvidia-smi",
         "nvidia-smi topo -m || true",
         "echo '===== rpm rdma packages ====='",
-        "rpm -qa | grep -i rdma || true",
+        "echo '$ rpm -qa | grep -i rdma'",
+        "(rpm -qa | grep -i rdma) || echo 'NO_OUTPUT: rpm -qa | grep -i rdma'",
         "echo '===== libmlx5 / ibverbs libraries ====='",
-        "ldconfig -p 2>/dev/null | grep -i libmlx5 || true",
-        "ldconfig -p 2>/dev/null | grep -Ei 'libibverbs|libnccl|libmlx' || true",
+        "echo '$ ldconfig -p | grep -i libmlx5'",
+        "(ldconfig -p 2>/dev/null | grep -i libmlx5) || echo 'NO_OUTPUT: ldconfig -p | grep -i libmlx5'",
+        "echo '$ ldconfig -p | grep -Ei libibverbs/libnccl/libmlx'",
+        "(ldconfig -p 2>/dev/null | grep -Ei 'libibverbs|libnccl|libmlx') || echo 'NO_OUTPUT: ldconfig -p | grep -Ei libibverbs/libnccl/libmlx'",
         "echo '===== infiniband devices ====='",
         "ls -l /dev/infiniband || true",
-        "(command -v ibv_devinfo && ibv_devinfo) || true",
+        "echo '$ ibv_devinfo'",
+        "(command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo) || echo 'COMMAND_NOT_FOUND_OR_FAILED: ibv_devinfo'",
         "echo '===== nccl env ====='",
-        "env | grep -i nccl || true",
+        "echo '$ env | grep -i nccl'",
+        "(env | grep -i nccl) || echo 'NO_OUTPUT: env | grep -i nccl'",
         "echo '===== network interfaces ====='",
         "ip -br addr || true",
         "echo '===== python/torch/nccl versions ====='",
