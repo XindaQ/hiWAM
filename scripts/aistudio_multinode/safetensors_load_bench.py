@@ -29,15 +29,27 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import load_file
 
+DEFAULT_METHODS = (
+    "raw_read,"
+    "safe_to_dtype_hold,"
+    "safe_to_dtype_hold,"
+    "safe_get_hold,"
+    "safe_to_dtype_discard,"
+    "load_file_mmap_to_dtype,"
+    "load_file_pread_to_dtype"
+)
+
 
 def parse_args() -> argparse.Namespace:
+    torch_threads = os.environ.get("LOAD_BENCH_TORCH_THREADS", "").strip()
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint-root", default=os.environ.get("DIFFSYNTH_MODEL_BASE_PATH", "checkpoints"))
     parser.add_argument("--pattern", default="Wan-AI/Wan2.2-TI2V-5B/diffusion_pytorch_model*.safetensors")
     parser.add_argument("--dtype", choices=["none", "bf16", "fp16", "fp32"], default="bf16")
-    parser.add_argument("--methods", default=os.environ.get("LOAD_BENCH_METHODS", "safe_to_dtype_hold,safe_to_dtype_hold,load_file_mmap_to_dtype,load_file_pread_to_dtype,raw_read"))
+    parser.add_argument("--methods", default=os.environ.get("LOAD_BENCH_METHODS", DEFAULT_METHODS))
     parser.add_argument("--raw-read-mib", type=int, default=int(os.environ.get("LOAD_BENCH_RAW_READ_MIB", "8")))
     parser.add_argument("--max-files", type=int, default=int(os.environ.get("LOAD_BENCH_MAX_FILES", "0")))
+    parser.add_argument("--torch-threads", type=int, default=int(torch_threads) if torch_threads else 0)
     return parser.parse_args()
 
 
@@ -48,6 +60,39 @@ def run_command(args: list[str]) -> str:
         return text.replace("\n", "\\n")
     except Exception as exc:  # pragma: no cover - diagnostics only
         return repr(exc)
+
+
+def configure_torch_threads(torch_threads: int) -> None:
+    if torch_threads <= 0:
+        return
+    torch.set_num_threads(torch_threads)
+    try:
+        torch.set_num_interop_threads(torch_threads)
+    except RuntimeError as exc:
+        log(f"SET_INTEROP_THREADS_SKIPPED error={exc!r}")
+
+
+def log_system_diagnostics(root: Path) -> None:
+    thread_env = {
+        name: os.environ.get(name)
+        for name in (
+            "OMP_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "LOAD_BENCH_TORCH_THREADS",
+        )
+    }
+    log(
+        "THREADS "
+        f"os_cpu_count={os.cpu_count()} "
+        f"torch_num_threads={torch.get_num_threads()} "
+        f"torch_num_interop_threads={torch.get_num_interop_threads()}"
+    )
+    log(f"ENV_THREADS {thread_env}")
+    log("MEMINFO " + run_command(["bash", "-lc", "grep -E 'MemTotal|MemFree|MemAvailable|SwapTotal|SwapFree|Shmem:' /proc/meminfo"]))
+    log("CPUINFO " + run_command(["bash", "-lc", "lscpu | grep -E 'Model name|CPU\\(s\\)|Thread|Core|Socket|NUMA'"]))
+    log("MOUNT_ROOT " + run_command(["bash", "-lc", f"findmnt -T {str(root)!r} || true"]))
 
 
 def dtype_from_name(name: str):
@@ -132,6 +177,39 @@ def bench_safe_get(paths: list[str], dtype) -> int:
     return total
 
 
+def bench_safe_get_hold(paths: list[str], dtype) -> int:
+    del dtype
+    state_dict = {}
+    total = 0
+    tensor_count = 0
+    for path in paths:
+        with safe_open(path, framework="pt", device="cpu") as handle:
+            for key in handle.keys():
+                tensor = handle.get_tensor(key)
+                state_dict[key] = tensor
+                total += tensor_nbytes(tensor)
+                tensor_count += 1
+    log(f"SAFE_GET_HOLD tensors={tensor_count} held_keys={len(state_dict)}")
+    del state_dict
+    return total
+
+
+def bench_safe_to_dtype_discard(paths: list[str], dtype) -> int:
+    total = 0
+    tensor_count = 0
+    for path in paths:
+        with safe_open(path, framework="pt", device="cpu") as handle:
+            for key in handle.keys():
+                tensor = handle.get_tensor(key)
+                if dtype is not None:
+                    tensor = tensor.to(dtype)
+                total += tensor_nbytes(tensor)
+                tensor_count += 1
+                del tensor
+    log(f"SAFE_TO_DTYPE_DISCARD tensors={tensor_count}")
+    return total
+
+
 def bench_safe_to_dtype_hold(paths: list[str], dtype) -> int:
     state_dict = {}
     total = 0
@@ -200,6 +278,7 @@ def run_bench(name: str, func: Callable[[list[str], torch.dtype | None], int], p
 
 def main() -> None:
     args = parse_args()
+    configure_torch_threads(args.torch_threads)
     root = Path(args.checkpoint_root)
     paths = sorted(glob.glob(str(root / args.pattern)))
     if args.max_files > 0:
@@ -217,6 +296,7 @@ def main() -> None:
         f"methods={args.methods}"
     )
     log("DF " + run_command(["df", "-h", "/", "/tmp", "/dev/shm", str(root)]))
+    log_system_diagnostics(root)
     for path in paths:
         log(f"FILE path={path} size_gib={Path(path).stat().st_size / (1024**3):.3f}")
 
@@ -225,6 +305,8 @@ def main() -> None:
     method_map: dict[str, Callable[[list[str], torch.dtype | None], int]] = {
         "raw_read": lambda p, d: bench_raw_read(p, args.raw_read_mib, d),
         "safe_get": bench_safe_get,
+        "safe_get_hold": bench_safe_get_hold,
+        "safe_to_dtype_discard": bench_safe_to_dtype_discard,
         "safe_to_dtype_hold": bench_safe_to_dtype_hold,
         "load_file_default_to_dtype": lambda p, d: bench_load_file(p, d, None),
         "load_file_mmap_to_dtype": lambda p, d: bench_load_file(p, d, "mmap"),

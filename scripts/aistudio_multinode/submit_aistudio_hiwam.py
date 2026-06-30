@@ -71,9 +71,10 @@ COMM_WARMUP = int(os.environ.get("COMM_WARMUP", "5"))
 COMM_ITERS = int(os.environ.get("COMM_ITERS", "20"))
 LOAD_BENCH_METHODS = os.environ.get(
     "LOAD_BENCH_METHODS",
-    "safe_to_dtype_hold,safe_to_dtype_hold,load_file_mmap_to_dtype,load_file_pread_to_dtype,raw_read",
+    "raw_read,safe_to_dtype_hold,safe_to_dtype_hold,safe_get_hold,safe_to_dtype_discard,load_file_mmap_to_dtype,load_file_pread_to_dtype",
 )
 LOAD_BENCH_MAX_FILES = os.environ.get("LOAD_BENCH_MAX_FILES", "0")
+LOAD_BENCH_TORCH_THREADS = os.environ.get("LOAD_BENCH_TORCH_THREADS", "").strip()
 if "uncond" in TRAIN_TASK and os.environ.get("ALLOW_UNCOND", "0") != "1":
     raise ValueError(
         f"Refusing to submit uncond task by default: {TRAIN_TASK}. "
@@ -284,6 +285,7 @@ def build_loadbench_command() -> str:
         "export DIFFSYNTH_SKIP_DOWNLOAD=true",
         f"export LOAD_BENCH_METHODS={shell_quote(LOAD_BENCH_METHODS)}",
         f"export LOAD_BENCH_MAX_FILES={shell_quote(LOAD_BENCH_MAX_FILES)}",
+        f"export LOAD_BENCH_TORCH_THREADS={shell_quote(LOAD_BENCH_TORCH_THREADS)}",
         "bash scripts/stage_checkpoints_local.sh \"${FASTWAM_SOURCE_CHECKPOINT_DIR}\" \"${FASTWAM_LOCAL_CHECKPOINT_DIR}\"",
         "export DIFFSYNTH_MODEL_BASE_PATH=\"${FASTWAM_LOCAL_CHECKPOINT_DIR}\"",
         "export FASTWAM_ENV=\"$(dirname \"$(dirname \"$PYTHON_BIN\")\")\"",
@@ -299,7 +301,8 @@ def build_loadbench_command() -> str:
         "--checkpoint-root \"${DIFFSYNTH_MODEL_BASE_PATH}\" "
         "--dtype bf16 "
         "--methods \"${LOAD_BENCH_METHODS}\" "
-        "--max-files \"${LOAD_BENCH_MAX_FILES}\"",
+        "--max-files \"${LOAD_BENCH_MAX_FILES}\" "
+        "--torch-threads \"${LOAD_BENCH_TORCH_THREADS:-0}\"",
         "echo LOADBENCH_DONE_SLEEPING_TO_KEEP_ALL_NODES_ALIVE",
         "sleep 60",
     ])
@@ -341,6 +344,7 @@ def main():
     if COMMAND_MODE == "loadbench":
         print("[submit] load_bench_methods:", LOAD_BENCH_METHODS)
         print("[submit] load_bench_max_files:", LOAD_BENCH_MAX_FILES)
+        print("[submit] load_bench_torch_threads:", LOAD_BENCH_TORCH_THREADS or "default")
     print("[submit] master: num=1 gpu_num=%s cpu=%s memory=%s disk_m=%s" % (
         GPUS_PER_NODE,
         CPU_PER_NODE,
