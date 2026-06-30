@@ -16,15 +16,11 @@ echo "[prewarm] pattern=${PATTERN}"
 echo "[prewarm] chunk_mb=${CHUNK_MB}"
 df -h "${CHECKPOINT_ROOT}" / /tmp /dev/shm 2>/dev/null || true
 
-mapfile -d '' files < <(find "${CHECKPOINT_ROOT}" -path "${CHECKPOINT_ROOT}/${PATTERN}" -type f -print0 | sort -z)
-if (( ${#files[@]} == 0 )); then
-  echo "[prewarm] no files matched"
-  exit 0
-fi
-
 total_bytes=0
 total_seconds=0
-for file in "${files[@]}"; do
+file_count=0
+while IFS= read -r file; do
+  file_count=$((file_count + 1))
   size_bytes="$(stat -c%s "${file}")"
   size_mib=$((size_bytes / 1024 / 1024))
   echo "[prewarm] file=${file} size_mib=${size_mib}"
@@ -38,7 +34,12 @@ for file in "${files[@]}"; do
   echo "[prewarm] done file=${file} seconds=${SECONDS} approx_mib_per_s=${mib_per_s}"
   total_bytes=$((total_bytes + size_bytes))
   total_seconds=$((total_seconds + SECONDS))
-done
+done < <(find "${CHECKPOINT_ROOT}" -path "${CHECKPOINT_ROOT}/${PATTERN}" -type f | sort)
+
+if (( file_count == 0 )); then
+  echo "[prewarm] no files matched"
+  exit 0
+fi
 
 total_mib=$((total_bytes / 1024 / 1024))
 if (( total_seconds <= 0 )); then
