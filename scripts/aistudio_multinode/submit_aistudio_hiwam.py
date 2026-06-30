@@ -75,6 +75,8 @@ LOAD_BENCH_METHODS = os.environ.get(
 )
 LOAD_BENCH_MAX_FILES = os.environ.get("LOAD_BENCH_MAX_FILES", "0")
 LOAD_BENCH_TORCH_THREADS = os.environ.get("LOAD_BENCH_TORCH_THREADS", "").strip()
+FASTWAM_PREWARM_CHECKPOINTS = os.environ.get("FASTWAM_PREWARM_CHECKPOINTS", "1")
+FASTWAM_PREWARM_CHUNK_MB = os.environ.get("FASTWAM_PREWARM_CHUNK_MB", "64")
 if "uncond" in TRAIN_TASK and os.environ.get("ALLOW_UNCOND", "0") != "1":
     raise ValueError(
         f"Refusing to submit uncond task by default: {TRAIN_TASK}. "
@@ -253,6 +255,8 @@ def build_train_command() -> str:
         f"export FASTWAM_SOURCE_CHECKPOINT_DIR={shell_quote(PROJECT_DIR + '/checkpoints')}",
         f"export FASTWAM_LOCAL_CHECKPOINT_DIR={shell_quote(LOCAL_CHECKPOINT_DIR)}",
         f"export AISTUDIO_CACHE_KIND={shell_quote(CACHE_KIND)}",
+        f"export FASTWAM_PREWARM_CHECKPOINTS={shell_quote(FASTWAM_PREWARM_CHECKPOINTS)}",
+        f"export FASTWAM_PREWARM_CHUNK_MB={shell_quote(FASTWAM_PREWARM_CHUNK_MB)}",
         "export FASTWAM_OUTPUT_ROOT=runs/aistudio_multinode",
         "export FASTWAM_DEBUG_WAN_LOAD=1",
         "export FASTWAM_SERIALIZE_WAN_LOAD=1",
@@ -337,6 +341,8 @@ def main():
     print("[submit] train_script:", TRAIN_SCRIPT)
     print("[submit] cache_kind:", CACHE_KIND)
     print("[submit] local_checkpoint_dir:", LOCAL_CHECKPOINT_DIR)
+    print("[submit] prewarm_checkpoints:", FASTWAM_PREWARM_CHECKPOINTS)
+    print("[submit] prewarm_chunk_mb:", FASTWAM_PREWARM_CHUNK_MB)
     if COMMAND_MODE == "comm":
         print("[submit] comm_sizes_mb:", COMM_SIZES_MB)
         print("[submit] comm_warmup:", COMM_WARMUP)

@@ -24,6 +24,12 @@ df -h / /tmp /dev/shm "$(dirname "${LOCAL_CKPT_DIR}")" "${SOURCE_CKPT_DIR}" 2>/d
 bash "${SCRIPT_DIR}/../stage_checkpoints_local.sh" "${SOURCE_CKPT_DIR}" "${LOCAL_CKPT_DIR}"
 
 export DIFFSYNTH_MODEL_BASE_PATH="${LOCAL_CKPT_DIR}"
+if [[ "${FASTWAM_PREWARM_CHECKPOINTS:-1}" != "0" ]]; then
+  bash "${SCRIPT_DIR}/prewarm_checkpoints.sh" "${DIFFSYNTH_MODEL_BASE_PATH}"
+else
+  echo "[aistudio_local_ckpt] checkpoint prewarm disabled"
+fi
+
 export FASTWAM_OUTPUT_ROOT="${FASTWAM_OUTPUT_ROOT:-runs/aistudio_multinode}"
 echo "[aistudio_local_ckpt] DIFFSYNTH_MODEL_BASE_PATH=${DIFFSYNTH_MODEL_BASE_PATH}"
 echo "[aistudio_local_ckpt] FASTWAM_OUTPUT_ROOT=${FASTWAM_OUTPUT_ROOT}"
