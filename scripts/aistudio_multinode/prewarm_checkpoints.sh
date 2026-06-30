@@ -2,41 +2,65 @@
 set -euo pipefail
 
 CHECKPOINT_ROOT="${1:?Usage: bash scripts/aistudio_multinode/prewarm_checkpoints.sh <checkpoint_root>}"
-PREWARM_FILES="${FASTWAM_PREWARM_FILES:-Wan-AI/Wan2.2-TI2V-5B/diffusion_pytorch_model-00001-of-00003.safetensors,Wan-AI/Wan2.2-TI2V-5B/diffusion_pytorch_model-00002-of-00003.safetensors,Wan-AI/Wan2.2-TI2V-5B/diffusion_pytorch_model-00003-of-00003.safetensors,DiffSynth-Studio/Wan-Series-Converted-Safetensors/Wan2.2_VAE.safetensors}"
+shift
 CHUNK_MB="${FASTWAM_PREWARM_CHUNK_MB:-64}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+HYDRA_OVERRIDES=("$@")
 
 echo "[prewarm] host=$(hostname)"
 echo "[prewarm] root=${CHECKPOINT_ROOT}"
-echo "[prewarm] files=${PREWARM_FILES}"
+echo "[prewarm] hydra_overrides=${HYDRA_OVERRIDES[*]:-<none>}"
 echo "[prewarm] chunk_mb=${CHUNK_MB}"
 echo "[prewarm] python=${PYTHON_BIN}"
 df -h "${CHECKPOINT_ROOT}" / /tmp /dev/shm 2>/dev/null || true
 
-"${PYTHON_BIN}" - "${CHECKPOINT_ROOT}" "${PREWARM_FILES}" "${CHUNK_MB}" <<'PY'
+RESOLVED_FILE="$(mktemp /tmp/hiwam_prewarm_files.XXXXXX)"
+cleanup() {
+    rm -f "${RESOLVED_FILE}"
+}
+trap cleanup EXIT
+
+if [[ -n "${FASTWAM_PREWARM_FILES:-}" ]]; then
+    "${PYTHON_BIN}" - "${CHECKPOINT_ROOT}" "${FASTWAM_PREWARM_FILES}" > "${RESOLVED_FILE}" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+for item in sys.argv[2].split(","):
+    item = item.strip()
+    if not item:
+        continue
+    path = Path(item)
+    if not path.is_absolute():
+        path = root / path
+    print(path)
+PY
+else
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/resolve_prewarm_files.py" \
+        --checkpoint-root "${CHECKPOINT_ROOT}" \
+        --project-root "${PROJECT_DIR}" \
+        "${HYDRA_OVERRIDES[@]}" > "${RESOLVED_FILE}"
+fi
+
+"${PYTHON_BIN}" - "${RESOLVED_FILE}" "${CHUNK_MB}" <<'PY'
 from pathlib import Path
 import socket
 import sys
 import time
 
-root = Path(sys.argv[1])
-relative_files = [item.strip() for item in sys.argv[2].split(",") if item.strip()]
-chunk_mb = int(sys.argv[3])
+file_list_path = Path(sys.argv[1])
+chunk_mb = int(sys.argv[2])
 chunk_size = chunk_mb * 1024 * 1024
-
-if not root.is_dir():
-    print(f"[prewarm] skip: checkpoint root does not exist: {root}", flush=True)
-    raise SystemExit(2)
-
-def is_readable_candidate(path: Path) -> bool:
-    return path.exists() or path.is_symlink()
-
 
 files = []
 missing = []
-for relative_file in relative_files:
-    path = root / relative_file
-    if is_readable_candidate(path):
+for line in file_list_path.read_text().splitlines():
+    if not line.strip():
+        continue
+    path = Path(line.strip())
+    if path.exists() or path.is_symlink():
         files.append(path)
         print(f"[prewarm] file_check path={path} exists=1", flush=True)
     else:
@@ -45,15 +69,12 @@ for relative_file in relative_files:
 
 if missing:
     print("[prewarm] missing required checkpoint files", flush=True)
-    preview = sorted(
-        str(path.relative_to(root))
-        for path in root.rglob("*")
-        if path.exists() or path.is_symlink()
-    )[:50]
     for path in missing:
         print(f"[prewarm] missing_file={path}", flush=True)
-    for item in preview:
-        print(f"[prewarm] available_file_preview={item}", flush=True)
+    raise SystemExit(2)
+
+if not files:
+    print("[prewarm] no checkpoint files resolved", flush=True)
     raise SystemExit(2)
 
 total_bytes = 0

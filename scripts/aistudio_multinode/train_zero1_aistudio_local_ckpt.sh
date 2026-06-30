@@ -25,7 +25,7 @@ bash "${SCRIPT_DIR}/../stage_checkpoints_local.sh" "${SOURCE_CKPT_DIR}" "${LOCAL
 
 export DIFFSYNTH_MODEL_BASE_PATH="${LOCAL_CKPT_DIR}"
 if [[ "${FASTWAM_PREWARM_CHECKPOINTS:-1}" != "0" ]]; then
-  bash "${SCRIPT_DIR}/prewarm_checkpoints.sh" "${DIFFSYNTH_MODEL_BASE_PATH}"
+  bash "${SCRIPT_DIR}/prewarm_checkpoints.sh" "${DIFFSYNTH_MODEL_BASE_PATH}" "${@:2}"
 else
   echo "[aistudio_local_ckpt] checkpoint prewarm disabled"
 fi
