@@ -18,7 +18,8 @@ LOCAL_CKPT_DIR="${FASTWAM_LOCAL_CHECKPOINT_DIR:-/tmp/hiwam_checkpoints}"
 echo "[aistudio_local_ckpt] host=$(hostname)"
 echo "[aistudio_local_ckpt] source_ckpt=${SOURCE_CKPT_DIR}"
 echo "[aistudio_local_ckpt] local_ckpt=${LOCAL_CKPT_DIR}"
-df -h /tmp "${SOURCE_CKPT_DIR}" 2>/dev/null || true
+mkdir -p "$(dirname "${LOCAL_CKPT_DIR}")"
+df -h / /tmp /dev/shm "$(dirname "${LOCAL_CKPT_DIR}")" "${SOURCE_CKPT_DIR}" 2>/dev/null || true
 
 bash "${SCRIPT_DIR}/../stage_checkpoints_local.sh" "${SOURCE_CKPT_DIR}" "${LOCAL_CKPT_DIR}"
 

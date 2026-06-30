@@ -24,6 +24,13 @@ PROJECT_DIR = "/team/xinda.qi/project-zhou/code/hiWAM"
 PYTHON_BIN = "/team/xinda.qi/envs/fastwam/bin/python"
 WANDB_DIR = "/team/xinda.qi/project-zhou/wandb"
 LOG_ROOT = "/team/xinda.qi/project-zhou/aistudio_job_logs"
+CACHE_KIND = os.environ.get("AISTUDIO_CACHE_KIND", "tmp").strip().lower()
+if CACHE_KIND not in {"tmp", "shm"}:
+    raise ValueError("AISTUDIO_CACHE_KIND must be either 'tmp' or 'shm'.")
+LOCAL_CHECKPOINT_DIR = os.environ.get(
+    "AISTUDIO_LOCAL_CHECKPOINT_DIR",
+    "/dev/shm/hiwam_checkpoints" if CACHE_KIND == "shm" else "/tmp/hiwam_checkpoints",
+)
 
 # Use "smoke" to verify AIStudio can start all nodes; "comm" for NCCL/RDMA diagnostics;
 # use "train" for the 20-step training test. macOS may set COMMAND_MODE=unix2003,
@@ -69,6 +76,7 @@ RUN_TAG = (
     f"{COMMAND_MODE}_"
     f"{NODE_COUNT}n{TOTAL_GPUS}g_"
     f"bs{PER_GPU_BATCH_SIZE}_acc{GRADIENT_ACCUMULATION_STEPS}_"
+    f"cache{CACHE_KIND}_"
     f"s{MAX_STEPS if MAX_STEPS else 'full'}_z{ZERO_STAGE}_"
     f"{uuid4().hex[:6]}"
 )
@@ -193,7 +201,8 @@ def build_train_command() -> str:
         f"export PYTHON_BIN={shell_quote(PYTHON_BIN)}",
         f"export WANDB_DIR={shell_quote(WANDB_DIR)}",
         f"export FASTWAM_SOURCE_CHECKPOINT_DIR={shell_quote(PROJECT_DIR + '/checkpoints')}",
-        "export FASTWAM_LOCAL_CHECKPOINT_DIR=/tmp/hiwam_checkpoints",
+        f"export FASTWAM_LOCAL_CHECKPOINT_DIR={shell_quote(LOCAL_CHECKPOINT_DIR)}",
+        f"export AISTUDIO_CACHE_KIND={shell_quote(CACHE_KIND)}",
         "export FASTWAM_OUTPUT_ROOT=runs/aistudio_multinode",
         "export FASTWAM_DEBUG_WAN_LOAD=1",
         "export FASTWAM_SERIALIZE_WAN_LOAD=1",
@@ -231,6 +240,8 @@ def main():
     print("[submit] gradient_accumulation_steps:", GRADIENT_ACCUMULATION_STEPS)
     print("[submit] max_steps:", MAX_STEPS)
     print("[submit] train_script:", TRAIN_SCRIPT)
+    print("[submit] cache_kind:", CACHE_KIND)
+    print("[submit] local_checkpoint_dir:", LOCAL_CHECKPOINT_DIR)
     if COMMAND_MODE == "comm":
         print("[submit] comm_sizes_mb:", COMM_SIZES_MB)
         print("[submit] comm_warmup:", COMM_WARMUP)
