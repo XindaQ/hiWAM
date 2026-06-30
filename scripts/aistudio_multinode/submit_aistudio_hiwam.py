@@ -33,13 +33,14 @@ LOCAL_CHECKPOINT_DIR = os.environ.get(
 )
 
 # Use "smoke" to verify AIStudio can start all nodes; "rdma" for lightweight RDMA
-# diagnostics; "comm" for NCCL all-reduce diagnostics; use "train" for the 20-step
-# training test. macOS may set COMMAND_MODE=unix2003,
+# diagnostics; "comm" for NCCL all-reduce diagnostics; "loadbench" for
+# safetensors checkpoint-load profiling; use "train" for the 20-step training
+# test. macOS may set COMMAND_MODE=unix2003,
 # so prefer the AIStudio-specific name and only accept known legacy values.
 _LEGACY_COMMAND_MODE = os.environ.get("COMMAND_MODE")
 COMMAND_MODE = os.environ.get("AISTUDIO_COMMAND_MODE")
 if COMMAND_MODE is None:
-    COMMAND_MODE = _LEGACY_COMMAND_MODE if _LEGACY_COMMAND_MODE in {"smoke", "rdma", "comm", "train"} else "train"
+    COMMAND_MODE = _LEGACY_COMMAND_MODE if _LEGACY_COMMAND_MODE in {"smoke", "rdma", "comm", "loadbench", "train"} else "train"
 
 # Resource shape. For 2 nodes x 8 GPUs, keep WORKER_NUM = 1.
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
@@ -68,6 +69,11 @@ ZERO_STAGE = 1
 COMM_SIZES_MB = os.environ.get("COMM_SIZES_MB", "1,16,64,256,512")
 COMM_WARMUP = int(os.environ.get("COMM_WARMUP", "5"))
 COMM_ITERS = int(os.environ.get("COMM_ITERS", "20"))
+LOAD_BENCH_METHODS = os.environ.get(
+    "LOAD_BENCH_METHODS",
+    "safe_to_dtype_hold,safe_to_dtype_hold,load_file_mmap_to_dtype,load_file_pread_to_dtype,raw_read",
+)
+LOAD_BENCH_MAX_FILES = os.environ.get("LOAD_BENCH_MAX_FILES", "0")
 if "uncond" in TRAIN_TASK and os.environ.get("ALLOW_UNCOND", "0") != "1":
     raise ValueError(
         f"Refusing to submit uncond task by default: {TRAIN_TASK}. "
@@ -260,6 +266,45 @@ def build_train_command() -> str:
     ])
 
 
+def build_loadbench_command() -> str:
+    return build_logged_command("loadbench", [
+        "export SSL_NO_VERIFY=1",
+        "echo AI_ENV MASTER_ADDR=${MASTER_ADDR:-} MASTER_PORT=${MASTER_PORT:-} WORLD_SIZE=${WORLD_SIZE:-} RANK=${RANK:-}",
+        "hostname",
+        "date",
+        "nvidia-smi",
+        "mount | grep ' /team ' || true",
+        f"ls -ld {shell_quote(PROJECT_DIR)}",
+        f"ls -l {shell_quote(PYTHON_BIN)}",
+        f"cd {shell_quote(PROJECT_DIR)}",
+        f"export PYTHON_BIN={shell_quote(PYTHON_BIN)}",
+        f"export FASTWAM_SOURCE_CHECKPOINT_DIR={shell_quote(PROJECT_DIR + '/checkpoints')}",
+        f"export FASTWAM_LOCAL_CHECKPOINT_DIR={shell_quote(LOCAL_CHECKPOINT_DIR)}",
+        f"export AISTUDIO_CACHE_KIND={shell_quote(CACHE_KIND)}",
+        "export DIFFSYNTH_SKIP_DOWNLOAD=true",
+        f"export LOAD_BENCH_METHODS={shell_quote(LOAD_BENCH_METHODS)}",
+        f"export LOAD_BENCH_MAX_FILES={shell_quote(LOAD_BENCH_MAX_FILES)}",
+        "bash scripts/stage_checkpoints_local.sh \"${FASTWAM_SOURCE_CHECKPOINT_DIR}\" \"${FASTWAM_LOCAL_CHECKPOINT_DIR}\"",
+        "export DIFFSYNTH_MODEL_BASE_PATH=\"${FASTWAM_LOCAL_CHECKPOINT_DIR}\"",
+        "export FASTWAM_ENV=\"$(dirname \"$(dirname \"$PYTHON_BIN\")\")\"",
+        "unset PYTHONPATH PythonPath",
+        "export PYTHONPATH=\"$PWD/src\"",
+        "export PATH=\"$FASTWAM_ENV/bin:/tmp/hiwam_bin:$PATH\"",
+        "export LD_LIBRARY_PATH=\"/team/xinda.qi/envs/fastwam/ffmpeg7/lib:$FASTWAM_ENV/lib:${LD_LIBRARY_PATH:-}\"",
+        "export VIRTUAL_ENV=\"$FASTWAM_ENV\"",
+        "export CONDA_PREFIX=\"$FASTWAM_ENV\"",
+        "export PYTHONNOUSERSITE=1",
+        "hash -r",
+        f"{shell_quote(PYTHON_BIN)} scripts/aistudio_multinode/safetensors_load_bench.py "
+        "--checkpoint-root \"${DIFFSYNTH_MODEL_BASE_PATH}\" "
+        "--dtype bf16 "
+        "--methods \"${LOAD_BENCH_METHODS}\" "
+        "--max-files \"${LOAD_BENCH_MAX_FILES}\"",
+        "echo LOADBENCH_DONE_SLEEPING_TO_KEEP_ALL_NODES_ALIVE",
+        "sleep 60",
+    ])
+
+
 def build_command() -> str:
     if COMMAND_MODE == "smoke":
         return build_smoke_command()
@@ -267,6 +312,8 @@ def build_command() -> str:
         return build_rdma_command()
     if COMMAND_MODE == "comm":
         return build_comm_command()
+    if COMMAND_MODE == "loadbench":
+        return build_loadbench_command()
     if COMMAND_MODE == "train":
         return build_train_command()
     raise ValueError(f"Unsupported COMMAND_MODE: {COMMAND_MODE}")
@@ -291,6 +338,9 @@ def main():
         print("[submit] comm_sizes_mb:", COMM_SIZES_MB)
         print("[submit] comm_warmup:", COMM_WARMUP)
         print("[submit] comm_iters:", COMM_ITERS)
+    if COMMAND_MODE == "loadbench":
+        print("[submit] load_bench_methods:", LOAD_BENCH_METHODS)
+        print("[submit] load_bench_max_files:", LOAD_BENCH_MAX_FILES)
     print("[submit] master: num=1 gpu_num=%s cpu=%s memory=%s disk_m=%s" % (
         GPUS_PER_NODE,
         CPU_PER_NODE,
