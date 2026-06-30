@@ -32,13 +32,14 @@ LOCAL_CHECKPOINT_DIR = os.environ.get(
     "/dev/shm/hiwam_checkpoints" if CACHE_KIND == "shm" else "/tmp/hiwam_checkpoints",
 )
 
-# Use "smoke" to verify AIStudio can start all nodes; "comm" for NCCL/RDMA diagnostics;
-# use "train" for the 20-step training test. macOS may set COMMAND_MODE=unix2003,
+# Use "smoke" to verify AIStudio can start all nodes; "rdma" for lightweight RDMA
+# diagnostics; "comm" for NCCL all-reduce diagnostics; use "train" for the 20-step
+# training test. macOS may set COMMAND_MODE=unix2003,
 # so prefer the AIStudio-specific name and only accept known legacy values.
 _LEGACY_COMMAND_MODE = os.environ.get("COMMAND_MODE")
 COMMAND_MODE = os.environ.get("AISTUDIO_COMMAND_MODE")
 if COMMAND_MODE is None:
-    COMMAND_MODE = _LEGACY_COMMAND_MODE if _LEGACY_COMMAND_MODE in {"smoke", "comm", "train"} else "train"
+    COMMAND_MODE = _LEGACY_COMMAND_MODE if _LEGACY_COMMAND_MODE in {"smoke", "rdma", "comm", "train"} else "train"
 
 # Resource shape. For 2 nodes x 8 GPUs, keep WORKER_NUM = 1.
 # For 8 nodes x 8 GPUs, set WORKER_NUM = 7.
@@ -138,6 +139,42 @@ def build_smoke_command() -> str:
     ])
 
 
+def build_rdma_command() -> str:
+    pycheck = (
+        "import torch; "
+        "print('torch', torch.__version__); "
+        "print('cuda_available', torch.cuda.is_available()); "
+        "print('cuda_device_count', torch.cuda.device_count()); "
+        "print('nccl_version', torch.cuda.nccl.version() if torch.cuda.is_available() else None)"
+    )
+    return build_logged_command("rdma", [
+        "export SSL_NO_VERIFY=1",
+        "echo AI_ENV MASTER_ADDR=${MASTER_ADDR:-} MASTER_PORT=${MASTER_PORT:-} WORLD_SIZE=${WORLD_SIZE:-} RANK=${RANK:-}",
+        "hostname",
+        "date",
+        "nvidia-smi",
+        "nvidia-smi topo -m || true",
+        "echo '===== rpm rdma packages ====='",
+        "rpm -qa | grep -i rdma || true",
+        "echo '===== libmlx5 / ibverbs libraries ====='",
+        "ldconfig -p 2>/dev/null | grep -i libmlx5 || true",
+        "ldconfig -p 2>/dev/null | grep -Ei 'libibverbs|libnccl|libmlx' || true",
+        "echo '===== infiniband devices ====='",
+        "ls -l /dev/infiniband || true",
+        "(command -v ibv_devinfo && ibv_devinfo) || true",
+        "echo '===== nccl env ====='",
+        "env | grep -i nccl || true",
+        "echo '===== network interfaces ====='",
+        "ip -br addr || true",
+        "echo '===== python/torch/nccl versions ====='",
+        f"cd {shell_quote(PROJECT_DIR)}",
+        f"export PYTHON_BIN={shell_quote(PYTHON_BIN)}",
+        f"{shell_quote(PYTHON_BIN)} -c {shell_quote(pycheck)}",
+        "echo RDMA_DIAG_DONE_SLEEPING_TO_KEEP_ALL_NODES_ALIVE",
+        "sleep 60",
+    ])
+
+
 def build_comm_command() -> str:
     return build_logged_command("comm", [
         "export SSL_NO_VERIFY=1",
@@ -220,6 +257,8 @@ def build_train_command() -> str:
 def build_command() -> str:
     if COMMAND_MODE == "smoke":
         return build_smoke_command()
+    if COMMAND_MODE == "rdma":
+        return build_rdma_command()
     if COMMAND_MODE == "comm":
         return build_comm_command()
     if COMMAND_MODE == "train":
@@ -282,7 +321,7 @@ def main():
         worker=worker,
         runtime="pytorch",
         rdma=True,
-        host_network=True,
+        hostNetwork=True,
         k8s_app_name=K8S_APP_NAME,
         k8s_priority="high",
         tag="type=SFT,basemodel=Wan2.2-TI2V-5B",
