@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from contextlib import contextmanager
+import fcntl
 import inspect
 import os
 from typing import Any
@@ -87,6 +89,31 @@ def _validate_dit_config(dit_config: dict[str, Any]) -> dict[str, Any]:
     return validated
 
 
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").lower() in {"1", "true", "yes", "on"}
+
+
+@contextmanager
+def _maybe_serialize_local_load(model_name: str):
+    if not _env_flag("FASTWAM_SERIALIZE_WAN_LOAD"):
+        yield
+        return
+
+    lock_dir = os.environ.get("FASTWAM_LOAD_LOCK_DIR", "/tmp/fastwam_load_locks")
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_path = os.path.join(lock_dir, f"{model_name}.lock")
+    start = time.time()
+    _debug_event("load_lock_wait_start", model_name=model_name, lock_path=lock_path)
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        _debug_event("load_lock_acquired", model_name=model_name, seconds=f"{time.time() - start:.2f}")
+        try:
+            yield
+        finally:
+            _debug_event("load_lock_release", model_name=model_name)
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 def _load_registered_model(
     path,
     model_name: str,
@@ -96,49 +123,50 @@ def _load_registered_model(
 ):
     total_start = time.time()
     _debug_event("load_registered_start", model_name=model_name, path=_debug_path_summary(path), device=device, dtype=torch_dtype)
-    start = time.time()
-    model_hash = hash_model_file(path)
-    _debug_event("load_registered_hash_done", model_name=model_name, model_hash=model_hash, seconds=f"{time.time() - start:.2f}")
-
-    matched_config = None
-    for config in WAN22_MODEL_REGISTRY:
-        if config["model_hash"] == model_hash and config["model_name"] == model_name:
-            matched_config = config
-            break
-    if matched_config is None:
-        raise ValueError(
-            f"Cannot detect model type for {model_name}. File: {path}. "
-            f"Model hash: {model_hash}. This standalone package follows DiffSynth hash-based loading."
-        )
-
-    model_class = matched_config["model_class"]
-    model_kwargs = dict(matched_config.get("extra_kwargs", {}))
-    if model_kwargs_override is not None:
-        model_kwargs.update(model_kwargs_override)
-    state_dict_converter = matched_config.get("state_dict_converter")
-
-    start = time.time()
-    _debug_event("model_init_start", model_name=model_name, model_class=model_class.__name__)
-    model = model_class(**model_kwargs)
-    _debug_event("model_init_done", model_name=model_name, seconds=f"{time.time() - start:.2f}")
-
-    start = time.time()
-    state_dict = load_state_dict(path, torch_dtype=torch_dtype, device="cpu")
-    _debug_event("state_dict_load_done", model_name=model_name, keys=len(state_dict), seconds=f"{time.time() - start:.2f}")
-    if state_dict_converter is not None:
+    with _maybe_serialize_local_load(model_name):
         start = time.time()
-        _debug_event("state_dict_convert_start", model_name=model_name)
-        state_dict = state_dict_converter(state_dict)
-        _debug_event("state_dict_convert_done", model_name=model_name, keys=len(state_dict), seconds=f"{time.time() - start:.2f}")
+        model_hash = hash_model_file(path)
+        _debug_event("load_registered_hash_done", model_name=model_name, model_hash=model_hash, seconds=f"{time.time() - start:.2f}")
 
-    start = time.time()
-    _debug_event("load_state_dict_into_model_start", model_name=model_name)
-    model.load_state_dict(state_dict, strict=False)
-    _debug_event("load_state_dict_into_model_done", model_name=model_name, seconds=f"{time.time() - start:.2f}")
-    start = time.time()
-    _debug_event("model_to_device_start", model_name=model_name, device=device, dtype=torch_dtype)
-    model = model.to(device=device, dtype=torch_dtype)
-    _debug_event("model_to_device_done", model_name=model_name, seconds=f"{time.time() - start:.2f}")
+        matched_config = None
+        for config in WAN22_MODEL_REGISTRY:
+            if config["model_hash"] == model_hash and config["model_name"] == model_name:
+                matched_config = config
+                break
+        if matched_config is None:
+            raise ValueError(
+                f"Cannot detect model type for {model_name}. File: {path}. "
+                f"Model hash: {model_hash}. This standalone package follows DiffSynth hash-based loading."
+            )
+
+        model_class = matched_config["model_class"]
+        model_kwargs = dict(matched_config.get("extra_kwargs", {}))
+        if model_kwargs_override is not None:
+            model_kwargs.update(model_kwargs_override)
+        state_dict_converter = matched_config.get("state_dict_converter")
+
+        start = time.time()
+        _debug_event("model_init_start", model_name=model_name, model_class=model_class.__name__)
+        model = model_class(**model_kwargs)
+        _debug_event("model_init_done", model_name=model_name, seconds=f"{time.time() - start:.2f}")
+
+        start = time.time()
+        state_dict = load_state_dict(path, torch_dtype=torch_dtype, device="cpu")
+        _debug_event("state_dict_load_done", model_name=model_name, keys=len(state_dict), seconds=f"{time.time() - start:.2f}")
+        if state_dict_converter is not None:
+            start = time.time()
+            _debug_event("state_dict_convert_start", model_name=model_name)
+            state_dict = state_dict_converter(state_dict)
+            _debug_event("state_dict_convert_done", model_name=model_name, keys=len(state_dict), seconds=f"{time.time() - start:.2f}")
+
+        start = time.time()
+        _debug_event("load_state_dict_into_model_start", model_name=model_name)
+        model.load_state_dict(state_dict, strict=False)
+        _debug_event("load_state_dict_into_model_done", model_name=model_name, seconds=f"{time.time() - start:.2f}")
+        start = time.time()
+        _debug_event("model_to_device_start", model_name=model_name, device=device, dtype=torch_dtype)
+        model = model.to(device=device, dtype=torch_dtype)
+        _debug_event("model_to_device_done", model_name=model_name, seconds=f"{time.time() - start:.2f}")
     _debug_event("load_registered_done", model_name=model_name, seconds=f"{time.time() - total_start:.2f}")
     return model
 

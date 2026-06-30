@@ -174,9 +174,22 @@ class ModelConfig:
 
 def load_state_dict(file_path, torch_dtype=None, device="cpu"):
     if isinstance(file_path, list):
+        total_start = time.time()
+        _debug_event("load_state_dict_list_start", path=_debug_path_summary(file_path), dtype=torch_dtype, device=device)
         state_dict = {}
-        for file_path_ in file_path:
-            state_dict.update(load_state_dict(file_path_, torch_dtype=torch_dtype, device=device))
+        for index, file_path_ in enumerate(file_path, start=1):
+            start = time.time()
+            _debug_event("load_state_dict_list_file_start", index=index, total=len(file_path), path=_debug_path_summary(file_path_))
+            partial_state_dict = load_state_dict(file_path_, torch_dtype=torch_dtype, device=device)
+            state_dict.update(partial_state_dict)
+            _debug_event(
+                "load_state_dict_list_file_done",
+                index=index,
+                total=len(file_path),
+                keys=len(partial_state_dict),
+                seconds=f"{time.time() - start:.2f}",
+            )
+        _debug_event("load_state_dict_list_done", keys=len(state_dict), seconds=f"{time.time() - total_start:.2f}")
         return state_dict
     if file_path.endswith(".safetensors"):
         return load_state_dict_from_safetensors(file_path, torch_dtype=torch_dtype, device=device)
@@ -188,7 +201,18 @@ def load_state_dict_from_safetensors(file_path, torch_dtype=None, device="cpu"):
     _debug_event("load_safetensors_start", path=_debug_path_summary(file_path), dtype=torch_dtype, device=device)
     state_dict = {}
     with safe_open(file_path, framework="pt", device=str(device)) as f:
-        for key in f.keys():
+        keys = list(f.keys())
+        _debug_event("load_safetensors_keys", path=_debug_path_summary(file_path), keys=len(keys))
+        for index, key in enumerate(keys, start=1):
+            if index == 1 or index % 100 == 0 or index == len(keys):
+                _debug_event(
+                    "load_safetensors_progress",
+                    path=_debug_path_summary(file_path),
+                    index=index,
+                    keys=len(keys),
+                    key=key,
+                    seconds=f"{time.time() - start:.2f}",
+                )
             value = f.get_tensor(key)
             if torch_dtype is not None:
                 value = value.to(torch_dtype)
