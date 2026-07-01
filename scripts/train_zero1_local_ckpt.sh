@@ -5,7 +5,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_DIR}"
 
-LOCAL_CKPT_DIR="${FASTWAM_LOCAL_CHECKPOINT_DIR:-/tmp/hiwam_checkpoints}"
+export FASTWAM_STAGE_DEREFERENCE_SYMLINKS="${FASTWAM_STAGE_DEREFERENCE_SYMLINKS:-1}"
+
+if [[ -n "${FASTWAM_LOCAL_CHECKPOINT_DIR:-}" ]]; then
+  LOCAL_CKPT_DIR="${FASTWAM_LOCAL_CHECKPOINT_DIR}"
+elif [[ "${FASTWAM_STAGE_DEREFERENCE_SYMLINKS}" == "1" ]]; then
+  LOCAL_CKPT_DIR="/tmp/hiwam_checkpoints_real"
+else
+  LOCAL_CKPT_DIR="/tmp/hiwam_checkpoints"
+fi
 SOURCE_CKPT_DIR="${FASTWAM_SOURCE_CHECKPOINT_DIR:-${PROJECT_DIR}/checkpoints}"
 DEBUG_ROOT="${FASTWAM_LOAD_DEBUG_DIR:-${PROJECT_DIR}/runs/load_debug}"
 DEBUG_LOG="${DEBUG_ROOT}/$(date +%Y%m%d_%H%M%S)_local_ckpt.log"
@@ -18,6 +26,7 @@ echo "[debug] host=$(hostname)"
 echo "[debug] date=$(date)"
 echo "[debug] source_ckpt=${SOURCE_CKPT_DIR}"
 echo "[debug] local_ckpt=${LOCAL_CKPT_DIR}"
+echo "[debug] dereference_symlinks=${FASTWAM_STAGE_DEREFERENCE_SYMLINKS}"
 echo "[debug] disk"
 df -h /tmp /workspace /ossfs /team 2>/dev/null || true
 echo "[debug] source_size"
