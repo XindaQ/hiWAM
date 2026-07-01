@@ -17,13 +17,15 @@ LOCAL_CKPT_DIR="${FASTWAM_LOCAL_CHECKPOINT_DIR:-/tmp/hiwam_checkpoints}"
 export FASTWAM_ENV
 export PATH="${FASTWAM_ENV}/bin:${PATH}"
 export PYTHONPATH="${PROJECT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}"
-export FASTWAM_STAGE_DEREFERENCE_SYMLINKS="${FASTWAM_STAGE_DEREFERENCE_SYMLINKS:-1}"
+export FASTWAM_STAGE_DEREFERENCE_SYMLINKS="${FASTWAM_STAGE_DEREFERENCE_SYMLINKS:-0}"
+export FASTWAM_MATERIALIZE_PREWARM_FILES="${FASTWAM_MATERIALIZE_PREWARM_FILES:-1}"
 
 echo "[aistudio_local_ckpt] host=$(hostname)"
 echo "[aistudio_local_ckpt] source_ckpt=${SOURCE_CKPT_DIR}"
 echo "[aistudio_local_ckpt] local_ckpt=${LOCAL_CKPT_DIR}"
 echo "[aistudio_local_ckpt] python=${PYTHON_BIN}"
 echo "[aistudio_local_ckpt] dereference_symlinks=${FASTWAM_STAGE_DEREFERENCE_SYMLINKS}"
+echo "[aistudio_local_ckpt] materialize_prewarm_files=${FASTWAM_MATERIALIZE_PREWARM_FILES}"
 echo "[aistudio_local_ckpt] hydra_overrides=${*:2}"
 mkdir -p "$(dirname "${LOCAL_CKPT_DIR}")"
 df -h / /tmp /dev/shm "$(dirname "${LOCAL_CKPT_DIR}")" "${SOURCE_CKPT_DIR}" 2>/dev/null || true
