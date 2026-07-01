@@ -75,7 +75,6 @@ def unique_existing(paths: Iterable[Path]) -> tuple[list[Path], list[Path]]:
     existing: list[Path] = []
     missing: list[Path] = []
     for path in paths:
-        path = path.resolve() if path.exists() else path
         key = str(path)
         if key in seen:
             continue
