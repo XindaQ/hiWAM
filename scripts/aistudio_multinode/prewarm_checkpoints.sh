@@ -50,15 +50,6 @@ while IFS= read -r resolved_path; do
     [[ -n "${resolved_path}" ]] && echo "[prewarm] resolved_path=${resolved_path}"
 done < "${RESOLVED_FILE}"
 
-if [[ "${FASTWAM_MATERIALIZE_PREWARM_FILES:-0}" == "1" ]]; then
-    echo "[prewarm] MATERIALIZE_BEGIN"
-    "${PYTHON_BIN}" "${SCRIPT_DIR}/materialize_prewarm_files.py" \
-        --checkpoint-root "${CHECKPOINT_ROOT}" \
-        --file-list "${RESOLVED_FILE}" \
-        --chunk-mb "${CHUNK_MB}"
-    echo "[prewarm] MATERIALIZE_DONE"
-fi
-
 "${PYTHON_BIN}" - "${RESOLVED_FILE}" "${CHUNK_MB}" <<'PY'
 from pathlib import Path
 import socket

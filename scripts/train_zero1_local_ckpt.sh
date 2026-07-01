@@ -6,11 +6,11 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_DIR}"
 
 export FASTWAM_STAGE_DEREFERENCE_SYMLINKS="${FASTWAM_STAGE_DEREFERENCE_SYMLINKS:-0}"
-export FASTWAM_MATERIALIZE_PREWARM_FILES="${FASTWAM_MATERIALIZE_PREWARM_FILES:-1}"
+export FASTWAM_MATERIALIZE_CHECKPOINTS="${FASTWAM_MATERIALIZE_CHECKPOINTS:-1}"
 
 if [[ -n "${FASTWAM_LOCAL_CHECKPOINT_DIR:-}" ]]; then
   LOCAL_CKPT_DIR="${FASTWAM_LOCAL_CHECKPOINT_DIR}"
-elif [[ "${FASTWAM_MATERIALIZE_PREWARM_FILES}" == "1" ]]; then
+elif [[ "${FASTWAM_MATERIALIZE_CHECKPOINTS}" != "0" ]]; then
   LOCAL_CKPT_DIR="/tmp/hiwam_checkpoints_materialized"
 else
   LOCAL_CKPT_DIR="/tmp/hiwam_checkpoints"
@@ -28,7 +28,7 @@ echo "[debug] date=$(date)"
 echo "[debug] source_ckpt=${SOURCE_CKPT_DIR}"
 echo "[debug] local_ckpt=${LOCAL_CKPT_DIR}"
 echo "[debug] dereference_symlinks=${FASTWAM_STAGE_DEREFERENCE_SYMLINKS}"
-echo "[debug] materialize_prewarm_files=${FASTWAM_MATERIALIZE_PREWARM_FILES}"
+echo "[debug] materialize_checkpoints=${FASTWAM_MATERIALIZE_CHECKPOINTS}"
 echo "[debug] disk"
 df -h /tmp /workspace /ossfs /team 2>/dev/null || true
 echo "[debug] source_size"
@@ -37,10 +37,10 @@ du -sh "${SOURCE_CKPT_DIR}" || true
 bash "${SCRIPT_DIR}/stage_checkpoints_local.sh" "${SOURCE_CKPT_DIR}" "${LOCAL_CKPT_DIR}"
 
 export DIFFSYNTH_MODEL_BASE_PATH="${LOCAL_CKPT_DIR}"
-if [[ "${FASTWAM_MATERIALIZE_PREWARM_FILES}" == "1" ]]; then
-  echo "[debug] PREWARM_MATERIALIZE_BEGIN"
-  bash "${SCRIPT_DIR}/aistudio_multinode/prewarm_checkpoints.sh" "${DIFFSYNTH_MODEL_BASE_PATH}" "${@:2}"
-  echo "[debug] PREWARM_MATERIALIZE_DONE"
+if [[ "${FASTWAM_MATERIALIZE_CHECKPOINTS}" != "0" ]]; then
+  echo "[debug] MATERIALIZE_BEGIN"
+  bash "${SCRIPT_DIR}/aistudio_multinode/materialize_checkpoints.sh" "${DIFFSYNTH_MODEL_BASE_PATH}" "${@:2}"
+  echo "[debug] MATERIALIZE_DONE"
 fi
 echo "[debug] DIFFSYNTH_MODEL_BASE_PATH=${DIFFSYNTH_MODEL_BASE_PATH}"
 echo "[debug] launching original train_zero1.sh"

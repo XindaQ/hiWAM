@@ -2,10 +2,11 @@
 """Copy only the resolved checkpoint files behind local symlinks.
 
 Input is a file list in the local checkpoint tree, produced from the same Hydra
-config as training. For each listed path:
-  local/path -> maybe inside a symlinked directory
-  real source = local/path.resolve()
-  local target = local/path
+config as training.
+
+For each listed path:
+  dst = local path training will read
+  src = dst.resolve()
 
 We first record all real sources, then replace symlink directories with real
 local directories and copy just those files. No recursive dereference.
@@ -114,7 +115,6 @@ def main() -> int:
     log(f"file_count={len(paths)}")
     log_disk(root, "before")
 
-    # Save real sources before replacing any symlink directory.
     copies: list[tuple[Path, Path, Path]] = []
     copy_total_bytes = 0
     for dst in paths:

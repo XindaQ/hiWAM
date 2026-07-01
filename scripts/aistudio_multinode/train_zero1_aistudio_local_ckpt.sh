@@ -18,14 +18,14 @@ export FASTWAM_ENV
 export PATH="${FASTWAM_ENV}/bin:${PATH}"
 export PYTHONPATH="${PROJECT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}"
 export FASTWAM_STAGE_DEREFERENCE_SYMLINKS="${FASTWAM_STAGE_DEREFERENCE_SYMLINKS:-0}"
-export FASTWAM_MATERIALIZE_PREWARM_FILES="${FASTWAM_MATERIALIZE_PREWARM_FILES:-1}"
+export FASTWAM_MATERIALIZE_CHECKPOINTS="${FASTWAM_MATERIALIZE_CHECKPOINTS:-1}"
 
 echo "[aistudio_local_ckpt] host=$(hostname)"
 echo "[aistudio_local_ckpt] source_ckpt=${SOURCE_CKPT_DIR}"
 echo "[aistudio_local_ckpt] local_ckpt=${LOCAL_CKPT_DIR}"
 echo "[aistudio_local_ckpt] python=${PYTHON_BIN}"
 echo "[aistudio_local_ckpt] dereference_symlinks=${FASTWAM_STAGE_DEREFERENCE_SYMLINKS}"
-echo "[aistudio_local_ckpt] materialize_prewarm_files=${FASTWAM_MATERIALIZE_PREWARM_FILES}"
+echo "[aistudio_local_ckpt] materialize_checkpoints=${FASTWAM_MATERIALIZE_CHECKPOINTS}"
 echo "[aistudio_local_ckpt] hydra_overrides=${*:2}"
 mkdir -p "$(dirname "${LOCAL_CKPT_DIR}")"
 df -h / /tmp /dev/shm "$(dirname "${LOCAL_CKPT_DIR}")" "${SOURCE_CKPT_DIR}" 2>/dev/null || true
@@ -33,6 +33,14 @@ df -h / /tmp /dev/shm "$(dirname "${LOCAL_CKPT_DIR}")" "${SOURCE_CKPT_DIR}" 2>/d
 bash "${SCRIPT_DIR}/../stage_checkpoints_local.sh" "${SOURCE_CKPT_DIR}" "${LOCAL_CKPT_DIR}"
 
 export DIFFSYNTH_MODEL_BASE_PATH="${LOCAL_CKPT_DIR}"
+if [[ "${FASTWAM_MATERIALIZE_CHECKPOINTS}" != "0" ]]; then
+  echo "[aistudio_local_ckpt] MATERIALIZE_BEGIN"
+  bash "${SCRIPT_DIR}/materialize_checkpoints.sh" "${DIFFSYNTH_MODEL_BASE_PATH}" "${@:2}"
+  echo "[aistudio_local_ckpt] MATERIALIZE_DONE"
+else
+  echo "[aistudio_local_ckpt] checkpoint materialize disabled"
+fi
+
 if [[ "${FASTWAM_PREWARM_CHECKPOINTS:-1}" != "0" ]]; then
   echo "[aistudio_local_ckpt] PREWARM_BEGIN"
   bash "${SCRIPT_DIR}/prewarm_checkpoints.sh" "${DIFFSYNTH_MODEL_BASE_PATH}" "${@:2}"
